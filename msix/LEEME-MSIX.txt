@@ -1,0 +1,32 @@
+MiauPlayer 1.7.9 - paquete MSIX para Microsoft Store
+=====================================================
+Identidad (de Partner Center): ia21.MiauPlayer / CN=99EC47F4-46C8-451A-8D0C-554779C4B800 / ia21
+Ya esta puesta en Paquete\AppxManifest.xml. No la cambies: debe coincidir con Partner Center.
+
+1) EMPAQUETAR (Windows)
+   - Instala el Windows SDK (trae makeappx y signtool).
+   - Doble clic en empaquetar.bat  ->  crea MiauPlayer-1.7.9.0-x64.msix (SIN firmar).
+   - Ese es el archivo que se sube a Partner Center. El Store lo firma por ti al certificar.
+
+2) PROBAR ANTES DE SUBIR (recomendado)
+   - PowerShell como administrador, en esta carpeta:  .\prueba-local.ps1
+     (firma una copia con un certificado de prueba y la instala; NO subas esa copia).
+   - Comprueba: abre, reproduce audio y video, "Abrir con" muestra MiauPlayer, las playlists se guardan en
+     Documentos\MiauPlayer\playlist, y el icono de los archivos asociados es el correcto.
+   - Para quitarlo:  Get-AppxPackage ia21.MiauPlayer | Remove-AppxPackage
+   - Si no hay Windows SDK en tu equipo, puedes saltarte la prueba y subir el .msix; pero la prueba evita rechazos.
+
+3) PARTNER CENTER
+   - Producto > Iniciar envio > Paquetes: arrastra MiauPlayer-1.7.9.0-x64.msix.
+   - Textos de la ficha y notas de certificacion: ver textos-tienda.txt.
+   - Politica de privacidad: sube PRIVACY.md a tu GitHub y pega la direccion (carpeta del GitHub).
+   - Logotipo de la tienda (caja 1:1): sube un PNG cuadrado de 1080x1080 del original del logo
+     (los iconos de este paquete salen de un .ico de 256 px y se verian borrosos en tamano grande).
+
+Notas del paquete
+   - Version del paquete: 1.7.9.0 (el Store pide 4 numeros). En cada actualizacion sube la version.
+   - Extensiones declaradas: 46 (las mismas que el instalador, incluido wma). Windows las ofrece como opcion
+     al usuario en "Abrir con"; MiauPlayer no se impone como predeterminado.
+   - En el paquete no se pregunta por asociar archivos: el menu Configuracion > "Asociar tipos de archivo"
+     abre la pagina de apps predeterminadas de Windows.
+   - FFmpeg (LGPL) va en el paquete como DLL, junto con FFMPEG-LICENSE.txt y LEEME.txt (avisos y enlaces al codigo).

@@ -1,0 +1,1 @@
+Copia aqui MiauPlayer.exe, las DLL de FFmpeg, FFMPEG-LICENSE.txt y LEEME.txt (no se suben al repositorio) y ejecuta ../empaquetar.bat

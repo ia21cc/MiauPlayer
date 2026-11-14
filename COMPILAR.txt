@@ -1,0 +1,21 @@
+MiauPlayer - como compilar (MinGW-w64 + FFmpeg "lgpl-shared" con carpetas include y lib)
+
+Usa el build "win64-lgpl-shared" de BtbN (https://github.com/BtbN/FFmpeg-Builds/releases). NO uses el "gpl": la licencia GPL
+obligaria a distribuir todo MiauPlayer bajo GPL. Tampoco uses builds "nonfree": no se pueden redistribuir.
+
+Automatico (Windows, con MinGW-w64 y NSIS en el PATH):
+    set FFMPEG=C:\ruta\ffmpeg-master-latest-win64-lgpl-shared
+    build.bat
+
+A mano:
+    windres app.rc -O coff -o app_res.o
+
+    g++ -std=c++17 -O2 -DUNICODE -D_UNICODE -I<ffmpeg>/include MiauPlayer.cpp app_res.o -o MiauPlayer.exe ^
+        -L<ffmpeg>/lib -lavformat -lavcodec -lavfilter -lswresample -lswscale -lavutil ^
+        -mwindows -municode -static -lgdiplus -lcomctl32 -lwinmm -ldwmapi -lole32 -loleaut32 ^
+        -lcomdlg32 -lshell32 -lshlwapi -luuid -lgdi32 -luser32 -lmsimg32 -ladvapi32
+
+Luego copia junto a MiauPlayer.exe las DLL de <ffmpeg>/bin (sin avdevice) a la carpeta dist\, con LEEME.txt y FFMPEG-LICENSE.txt,
+y genera el instalador con:  makensis MiauPlayer.nsi
+
+Probado con FFmpeg N-128837-g986bab2b47-20261112 (BtbN, win64-lgpl-shared): avcodec-63, avformat-63, avutil-61, swresample-7, swscale-10, avfilter-12.
