@@ -1,5 +1,15 @@
 # Cambios
 
+## 1.7.12
+- Mas espacio para el video: la interfaz es mas compacta en altura (barra de titulo, franja de botones, filas de volumen y ganancia, ecualizador y forma de onda). No se quito ninguna opcion; solo se redujeron alturas de filas, sliders e iconos. La misma presentacion mas baja se ve tambien al reproducir audio. La altura minima de la ventana baja de 600 a 560 y la inicial de 660 a 590.
+- Informacion de la pista (clic derecho): ahora muestra el tamano del archivo (y los bytes exactos) y la ruta completa. La ruta se parte en varias lineas, preferentemente tras una barra, para que la ventana no se ensanche.
+
+## 1.7.11
+- ReplayGain: MiauPlayer respeta la ganancia de normalizacion que traen las etiquetas del archivo (replaygain_track_gain / replaygain_album_gain y sus picos, en ID3, APE, Vorbis y MP4). Nuevo submenu "ReplayGain" en el engranaje: Desactivado / Pista (por defecto) / Album. Si la ganancia es positiva y el archivo trae pico, no se supera 0 dBFS. La informacion de la pista muestra los valores leidos. Nota: MP3Gain en su modo normal ya modifica el audio del MP3 y se oye sin necesitar esto; la funcion cubre las herramientas que solo escriben etiquetas.
+
+## 1.7.10
+- Paquete MSIX (Microsoft Store): el manifiesto declara los verbos "Abrir" y "Anadir a la lista de MiauPlayer" para cada tipo de archivo asociado, para que el menu contextual de Windows ofrezca anadir pistas a la lista, como hace el instalador normal. El verbo "Anadir a la lista" usa MultiSelectModel="Document": con varias pistas seleccionadas, Windows lanza una vez el verbo por cada pista y la instancia unica las va sumando a la lista.
+
 ## 1.7.9
 - Preparacion para Microsoft Store (MSIX): si el programa corre como paquete MSIX no pregunta por asociar archivos (lo declara el manifiesto), "Asociar tipos de archivo" abre la pagina de apps predeterminadas de Windows y las playlists se guardan en Documentos\MiauPlayer\playlist (la carpeta del paquete es de solo lectura). Sin cambios para el instalador normal.
 - Anadido PRIVACY.md (politica de privacidad).

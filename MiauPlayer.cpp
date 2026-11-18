@@ -487,6 +487,24 @@ static const TrEntry kTr[] = {
     { L"desconocido",
       L"unknown",
       L"desconhecido" },
+    { L"Tama\u00f1o",
+      L"Size",
+      L"Tamanho" },
+    { L"Ruta",
+      L"Path",
+      L"Caminho" },
+    { L"Desactivado",
+      L"Off",
+      L"Desativado" },
+    { L"Pista",
+      L"Track",
+      L"Faixa" },
+    { L"\u00c1lbum",
+      L"Album",
+      L"\u00c1lbum" },
+    { L"sin datos en el archivo",
+      L"no data in the file",
+      L"sem dados no arquivo" },
     { L"total del archivo",
       L"file total",
       L"total do arquivo" },
@@ -587,6 +605,45 @@ static int openInput(AVFormatContext** out, const std::string& path) {
 }
 
 // ------------------------------------------------------------ decodificador
+// ---- ReplayGain: etiquetas replaygain_track_gain / replaygain_album_gain (y los picos) que dejan programas como
+// foobar2000, MP3Gain en modo etiquetas, loudgain, etc. MP3Gain en modo normal no usa etiquetas: cambia el propio audio.
+struct ReplayGain { double track = NAN, album = NAN, trackPeak = NAN, albumPeak = NAN; };
+
+static double rgNum(const char* s) {
+    if (!s) return NAN;
+    std::string t(s);
+    for (auto& c : t) if (c == ',') c = '.';
+    char* e = nullptr;
+    const double v = strtod(t.c_str(), &e);
+    return e == t.c_str() ? NAN : v;
+}
+
+static ReplayGain readReplayGain(AVFormatContext* fmt, int si) {
+    ReplayGain r;
+    auto get = [&](const char* key) -> double {
+        const AVDictionaryEntry* e = av_dict_get(fmt->metadata, key, nullptr, 0);
+        if (!e && si >= 0 && si < (int)fmt->nb_streams) e = av_dict_get(fmt->streams[si]->metadata, key, nullptr, 0);
+        return e ? rgNum(e->value) : NAN;
+    };
+    r.track = get("replaygain_track_gain");
+    r.album = get("replaygain_album_gain");
+    r.trackPeak = get("replaygain_track_peak");
+    r.albumPeak = get("replaygain_album_peak");
+    return r;
+}
+
+// ganancia (dB) a aplicar segun el modo; 0 si no hay datos. Si la ganancia es positiva y hay pico, no pasa de 0 dBFS.
+static double rgChosenDb(const ReplayGain& r, int mode) {
+    if (mode <= 0) return 0.0;
+    double g = NAN, pk = NAN;
+    if (mode == 2 && !std::isnan(r.album)) { g = r.album; pk = r.albumPeak; }
+    else if (!std::isnan(r.track)) { g = r.track; pk = r.trackPeak; }
+    else if (!std::isnan(r.album)) { g = r.album; pk = r.albumPeak; }
+    if (std::isnan(g)) return 0.0;
+    if (g > 0 && !std::isnan(pk) && pk > 0) g = std::min(g, -20.0 * log10(pk));
+    return std::max(-30.0, std::min(30.0, g));
+}
+
 struct Decoder {
     AVFormatContext* fmt = nullptr;
     AVCodecContext* cc = nullptr;
@@ -605,6 +662,7 @@ struct Decoder {
     bool noAudio = false;
     long long silentFrames = 0, totalFrames = 0;
     std::atomic<bool>* videoEnded = nullptr;
+    ReplayGain rg;           // ganancia de normalizacion que trae el archivo en sus etiquetas
 
     ~Decoder() { close(); }
 
@@ -653,6 +711,7 @@ struct Decoder {
         if (!initSwr()) return false;
         pkt = av_packet_alloc();
         frm = av_frame_alloc();
+        rg = readReplayGain(fmt, si);
         if (duration <= 0) {
             AVStream* st = fmt->streams[si];
             if (st->duration != AV_NOPTS_VALUE && st->duration > 0) duration = st->duration * av_q2d(st->time_base);
@@ -796,6 +855,7 @@ static int g_cur = -1;
 static std::atomic<int> g_state(ST_STOPPED);
 static std::atomic<int> g_gen(0);            // generación de pista (invalida hilos viejos)
 static std::atomic<float> g_gainDb(0.f);
+static std::atomic<int> g_rgMode(1);          // ReplayGain: 0 = desactivado, 1 = pista, 2 = album
 static std::atomic<float> g_speed(1.0f);     // velocidad de reproduccion 1/3x .. 3x (el tono se conserva)
 static std::atomic<float> g_eqDb[3];
 static std::atomic<bool> g_limiter(false);
@@ -1198,7 +1258,8 @@ static DWORD WINAPI audioThread(LPVOID p) {
             }
         eqOn = eqNow[0] != 0 || eqNow[1] != 0 || eqNow[2] != 0;
         const float vol = g_muted.load() ? 0.f : g_vol01.load() * g_vol01.load();
-        const float tgtG = powf(10.f, g_gainDb.load() / 20.f) * vol;
+        const float rgDb = (float)rgChosenDb(dec.rg, g_rgMode.load());   // ReplayGain del archivo (0 si no tiene o esta desactivado)
+        const float tgtG = powf(10.f, (g_gainDb.load() + rgDb) / 20.f) * vol;
         const bool lim = g_limiter.load();
 
         for (int i = 0; i < NB; i++) {
@@ -1667,8 +1728,8 @@ static const COLORREF C_WAVE_REST = RGB(190, 68, 64);
 static const COLORREF C_WAVE_CLIP = RGB(255, 214, 102);
 static const COLORREF C_PANEL = RGB(246, 247, 249);
 
-static const int CAP_H = 44;       // alto de la barra de titulo
-static const int BAND_H = 62;      // alto de la franja de botones
+static const int CAP_H = 40;       // alto de la barra de titulo
+static const int BAND_H = 54;      // alto de la franja de botones
 static const int MARGIN = 14;
 static const int CAP_BTN_W = 46;
 
@@ -2730,6 +2791,14 @@ static void showCaptureOptions() {
         AppendMenu(lm, MF_STRING | (sel == LNG_PT ? MF_CHECKED : 0), 12, L"Portugu\u00eas");
         AppendMenu(m, MF_POPUP, (UINT_PTR)lm, TX(L"Idioma"));   // DestroyMenu(m) tambien libera el submenu
     }
+    {
+        const int rgm = g_rgMode.load();
+        HMENU rm = CreatePopupMenu();
+        AppendMenu(rm, MF_STRING | (rgm == 0 ? MF_CHECKED : 0), 20, TX(L"Desactivado"));
+        AppendMenu(rm, MF_STRING | (rgm == 1 ? MF_CHECKED : 0), 21, TX(L"Pista"));
+        AppendMenu(rm, MF_STRING | (rgm == 2 ? MF_CHECKED : 0), 22, TX(L"\u00c1lbum"));
+        AppendMenu(m, MF_POPUP, (UINT_PTR)rm, L"ReplayGain");
+    }
     AppendMenu(m, MF_STRING, 4, TX(L"Asociar tipos de archivo\u2026"));
     RECT br;
     GetWindowRect(GetDlgItem(g_hwnd, ID_SNAPOPT), &br);
@@ -2740,6 +2809,7 @@ static void showCaptureOptions() {
     if (cmd == 2) changeCaptureDir();
     else if (cmd == 3) { g_capDir.clear(); saveCaptureDir(); g_lastCapture.clear(); }
     else if (cmd == 4) associateFileTypes();
+    else if (cmd >= 20 && cmd <= 22) { g_rgMode = cmd - 20; regSetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"ReplayGain", (DWORD)(cmd - 20)); }
     else if (cmd >= 10 && cmd <= 12) setLanguagePref(cmd - 10);   // 10 = es, 11 = en, 12 = pt (ver LNG_*)
 }
 
@@ -3305,7 +3375,7 @@ static void layout(int w, int h) {
     // franja de botones: tamano normal; solo si la ventana es estrecha se compacta (Abrir y Stop quedan solo con
     // icono) y, si aun asi no cabe, todos los botones se encogen proporcionalmente
     {
-        const int bh = 40, by = CAP_H + (BAND_H - bh) / 2;
+        const int bh = 34, by = CAP_H + (BAND_H - bh) / 2;
         const int rightFull = 52 + (video ? 8 + 52 : 0), gapLR = 16;
         const int needFull = 548 + gapLR + rightFull, needCompact = 472 + gapLR + rightFull;
         double f = 1.0;
@@ -3345,10 +3415,10 @@ static void layout(int w, int h) {
         ShowWindow(lb, video ? SW_SHOW : SW_HIDE);
     }
 
-    int y = CAP_H + BAND_H + 10;
-    const int rowH = 38;
-    const int lowerH = 26 + rowH * 2 + 32 + 62;
-    const int waveH = video ? 64 : 112;   // 75% de 150
+    int y = CAP_H + BAND_H + 8;
+    const int rowH = 30, sliderH = 24;
+    const int lowerH = 22 + rowH * 2 + 30 + 54;
+    const int waveH = video ? 52 : 96;
     if (video) {
         int vh = std::max(100, h - y - M - (waveH + 8) - lowerH);
         g_videoRect = { M, y, M + ww, y + vh };
@@ -3360,21 +3430,21 @@ static void layout(int w, int h) {
         g_videoAreaH = 0;
     }
     g_waveRect = { M, y, M + ww, y + waveH };
-    y += waveH + 6;
-    moveCtl(g_time, M + 2, y, ww, 20, TRUE);
-    y += 26;
+    y += waveH + 4;
+    moveCtl(g_time, M + 2, y, ww, 18, TRUE);
+    y += 22;
     moveCtl(g_volTxt, M + 2, y, 190, 22, TRUE);
-    moveCtl(g_vol, M + 200, y - 6, std::max(100, ww - 200 - 112), 28, TRUE);
-    moveCtl(g_mute, M + ww - 98, y - 4, 98, 30, TRUE);
+    moveCtl(g_vol, M + 200, y - 4, std::max(100, ww - 200 - 112), sliderH, TRUE);
+    moveCtl(g_mute, M + ww - 98, y - 3, 98, 26, TRUE);
     y += rowH;
     moveCtl(g_gainTxt, M + 2, y, 190, 22, TRUE);
-    moveCtl(g_gain, M + 200, y - 6, std::max(100, ww - 200 - 112), 28, TRUE);
-    moveCtl(GetDlgItem(g_hwnd, ID_RESET), M + ww - 98, y - 4, 98, 30, TRUE);
+    moveCtl(g_gain, M + 200, y - 4, std::max(100, ww - 200 - 112), sliderH, TRUE);
+    moveCtl(GetDlgItem(g_hwnd, ID_RESET), M + ww - 98, y - 3, 98, 26, TRUE);
     y += rowH;
-    moveCtl(g_limit, M, y, 190, 26, TRUE);
-    moveCtl(g_peakChk, M + 200, y, 66, 26, TRUE);
+    moveCtl(g_limit, M, y, 190, 24, TRUE);
+    moveCtl(g_peakChk, M + 200, y, 66, 24, TRUE);
     {
-        const int ibw = 34, ibh = 28, gp = 6;
+        const int ibw = 32, ibh = 26, gp = 6;
         auto bx = [&](int i) { return M + ww - (i + 1) * ibw - i * gp; };   // i = 0 es el de mas a la derecha
         moveCtl(GetDlgItem(g_hwnd, ID_ABOUT), bx(0), y - 1, ibw, ibh, TRUE);
         moveCtl(GetDlgItem(g_hwnd, ID_NETURL), bx(1), y - 1, ibw, ibh, TRUE);
@@ -3383,13 +3453,13 @@ static void layout(int w, int h) {
         moveCtl(GetDlgItem(g_hwnd, ID_SNAP), bx(4), y - 1, ibw, ibh, TRUE);
         moveCtl(g_peakTxt, M + 270, y + 2, std::max(10, ww - 270 - (5 * ibw + 4 * gp + 10)), 22, TRUE);
     }
-    y += 34;
+    y += 30;
     int cw = ww / 3;
     for (int i = 0; i < 3; i++) {
-        moveCtl(g_eqTxt[i], M + 2 + i * cw, y, cw - 8, 20, TRUE);
-        moveCtl(g_eq[i], M + i * cw, y + 20, cw - 8, 28, TRUE);
+        moveCtl(g_eqTxt[i], M + 2 + i * cw, y, cw - 8, 18, TRUE);
+        moveCtl(g_eq[i], M + i * cw, y + 18, cw - 8, sliderH, TRUE);
     }
-    y += 62;
+    y += 54;
     g_plMid = 0;
     g_panelFloating = video && g_listFloat;
     if (video && !g_listFloat) {
@@ -4190,7 +4260,7 @@ static void onTimer() {
 }
 
 // ------------------------------------------------------------ ventana "Acerca de"
-#define APP_VERSION L"1.7.9"
+#define APP_VERSION L"1.7.12"
 static const wchar_t* kAboutClass = L"MiauAbout";
 static const wchar_t* kSiteUrl = L"https://ia21.cc";
 static const wchar_t* kKofiUrl = L"https://ko-fi.com/miauapps";
@@ -4521,6 +4591,34 @@ static std::wstring upperAscii(const char* s) {
 }
 
 // Tipo de archivo, bitrate y frecuencia de muestreo, leidos con FFmpeg (sin reproducir nada)
+// Parte un texto largo (la ruta) en varias lineas para que el cuadro de informacion no se ensanche: corta preferentemente
+// despues de una barra invertida; si no hay ninguna, corta en el limite.
+static std::wstring wrapPath(const std::wstring& t, size_t lim) {
+    std::wstring out;
+    size_t i = 0;
+    while (i < t.size()) {
+        if (t.size() - i <= lim) { out += t.substr(i); break; }
+        size_t cut = std::wstring::npos;
+        for (size_t k = i + lim; k > i + lim / 2; k--) if (t[k - 1] == L'\\' || t[k - 1] == L'/') { cut = k; break; }
+        if (cut == std::wstring::npos) cut = i + lim;
+        out += t.substr(i, cut - i) + L"\n";
+        i = cut;
+    }
+    return out;
+}
+
+// 1234567 -> "1,18 MB (1 234 567 bytes)" con separador de miles por espacio
+static std::wstring fmtFileSize(long long b) {
+    std::wstring digits = std::to_wstring(b), grp;
+    for (size_t i = 0; i < digits.size(); i++) { if (i && (digits.size() - i) % 3 == 0) grp += L' '; grp += digits[i]; }
+    wchar_t nb[64];
+    if (b >= (1LL << 30)) swprintf(nb, 64, L"%.2f GB", b / 1073741824.0);
+    else if (b >= (1LL << 20)) swprintf(nb, 64, L"%.2f MB", b / 1048576.0);
+    else if (b >= 1024) swprintf(nb, 64, L"%.1f KB", b / 1024.0);
+    else swprintf(nb, 64, L"%lld B", b);
+    return std::wstring(nb) + L"  (" + grp + L" bytes)";
+}
+
 static void showTrackInfo(int idx) {
     if (idx < 0 || idx >= (int)g_playlist.size() || isUrl(g_playlist[idx])) return;
     const std::wstring path = g_playlist[idx];
@@ -4579,13 +4677,31 @@ static void showTrackInfo(int idx) {
         if (bits > 0 && (ap->format == AV_SAMPLE_FMT_FLT || ap->format == AV_SAMPLE_FMT_FLTP) && ap->codec_id >= AV_CODEC_ID_PCM_F32BE && ap->codec_id <= AV_CODEC_ID_PCM_F64LE)
             depth = std::to_wstring(bits) + L" " + TX(L"bits (flotante)");
     }
+    const ReplayGain rgi = readReplayGain(fmt, ai);
+    std::wstring rgText;
+    {
+        wchar_t nb[64];
+        if (!std::isnan(rgi.track)) { swprintf(nb, 64, L"%ls %+.2f dB", TX(L"Pista"), rgi.track); rgText = nb; }
+        if (!std::isnan(rgi.album)) { swprintf(nb, 64, L"%ls %+.2f dB", TX(L"\u00c1lbum"), rgi.album); rgText += (rgText.empty() ? L"" : L"   ") + std::wstring(nb); }
+        if (rgText.empty()) rgText = TX(L"sin datos en el archivo");
+    }
     avformat_close_input(&fmt);
 
-    const std::wstring text = std::wstring(TX(L"Archivo")) + L": " + baseName(path) + L"\n\n" +
+    std::wstring sizeText = TX(L"desconocido");
+    {
+        WIN32_FILE_ATTRIBUTE_DATA fa;
+        if (GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fa))
+            sizeText = fmtFileSize(((long long)fa.nFileSizeHigh << 32) | fa.nFileSizeLow);
+    }
+
+    const std::wstring text = std::wstring(TX(L"Archivo")) + L": " + baseName(path) + L"\n" +
+                              TX(L"Tama\u00f1o") + L": " + sizeText + L"\n" +
+                              TX(L"Ruta") + L":\n" + wrapPath(path, 58) + L"\n\n" +
                               TX(L"Tipo") + L": " + type + L"\n" +
                               L"Bitrate: " + brText + L"\n" +
                               TX(L"Frecuencia") + L": " + hz + L"\n" +
-                              TX(L"Profundidad de bits") + L": " + depth;
+                              TX(L"Profundidad de bits") + L": " + depth + L"\n" +
+                              L"ReplayGain: " + rgText;
     MessageBoxW(g_hwnd, text.c_str(), title, MB_OK);   // sin icono: asi Windows no reproduce sonido de alerta
 }
 
@@ -4844,7 +4960,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     case WM_GETMINMAXINFO: {
         MINMAXINFO* mi = (MINMAXINFO*)l;
         mi->ptMinTrackSize.x = 600;
-        mi->ptMinTrackSize.y = 600;
+        mi->ptMinTrackSize.y = 560;
         return 0;
     }
     case WM_ERASEBKGND:
@@ -5180,6 +5296,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
     }
     initLanguage(langArg);
     loadCaptureDir();
+    { DWORD rv = 0; if (regGetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"ReplayGain", rv) && rv <= 2) g_rgMode = (int)rv; }
     // instancia unica: si ya hay un MiauPlayer abierto, le pasamos los archivos y salimos
     HANDLE singleMutex = CreateMutexW(nullptr, FALSE, L"Local\\MiauPlayer.SingleInstance");
     if (singleMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -5234,7 +5351,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
     RECT wa = { 0, 0, 1024, 728 };
     SystemParametersInfo(SPI_GETWORKAREA, 0, &wa, 0);
     const int winW = std::min(780, (int)(wa.right - wa.left) - 16);
-    const int winH = std::min(660, (int)(wa.bottom - wa.top) - 16);
+    const int winH = std::min(590, (int)(wa.bottom - wa.top) - 16);
     const int winX = wa.left + ((wa.right - wa.left) - winW) / 2;
     const int winY = wa.top + ((wa.bottom - wa.top) - winH) / 2;
     HWND hw = CreateWindowEx(0, L"MiauPlayer", L"MiauPlayer", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,

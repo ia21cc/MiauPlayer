@@ -2,7 +2,7 @@
 # Ejecutar en PowerShell como administrador, en esta carpeta, despues de empaquetar.bat.
 $ErrorActionPreference = 'Stop'
 $subject = 'CN=99EC47F4-46C8-451A-8D0C-554779C4B800'          # debe coincidir con el publicador del manifiesto
-$msix    = Join-Path $PSScriptRoot 'MiauPlayer-1.7.9.0-x64.msix'
+$msix    = Join-Path $PSScriptRoot 'MiauPlayer-1.7.12.0-x64.msix'
 $test    = Join-Path $PSScriptRoot 'MiauPlayer-PRUEBA-firmado.msix'
 $cert = New-SelfSignedCertificate -Type Custom -Subject $subject -KeyUsage DigitalSignature -FriendlyName 'MiauPlayer prueba' `
         -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}')
