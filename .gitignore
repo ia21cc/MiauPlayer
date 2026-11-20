@@ -1,0 +1,11 @@
+# compilacion
+*.o
+*.exe
+dist/
+# FFmpeg (se descarga aparte, no se sube al repositorio)
+*.dll
+ffmpeg*/
+# editores
+.vscode/
+.vs/
+*.log
