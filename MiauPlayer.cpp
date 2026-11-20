@@ -4260,7 +4260,7 @@ static void onTimer() {
 }
 
 // ------------------------------------------------------------ ventana "Acerca de"
-#define APP_VERSION L"1.7.12"
+#define APP_VERSION L"1.7.13"
 static const wchar_t* kAboutClass = L"MiauAbout";
 static const wchar_t* kSiteUrl = L"https://ia21.cc";
 static const wchar_t* kKofiUrl = L"https://ko-fi.com/miauapps";

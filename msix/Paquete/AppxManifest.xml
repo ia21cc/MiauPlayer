@@ -5,11 +5,14 @@
   xmlns:uap2="http://schemas.microsoft.com/appx/manifest/uap/windows10/2"
   xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap2 uap3 rescap">
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  IgnorableNamespaces="uap uap2 uap3 rescap desktop4 desktop5 com">
 
   <Identity Name="ia21.MiauPlayer"
             Publisher="CN=99EC47F4-46C8-451A-8D0C-554779C4B800"
-            Version="1.7.12.0"
+            Version="1.7.13.0"
             ProcessorArchitecture="x64" />
 
   <Properties>
@@ -74,8 +77,7 @@
               <uap:FileType>.wave</uap:FileType>
               </uap:SupportedFileTypes>
               <uap2:SupportedVerbs>
-                <uap3:Verb Id="open" Parameters="&quot;%1&quot;" MultiSelectModel="Player">Abrir con MiauPlayer</uap3:Verb>
-                <uap3:Verb Id="MiauAdd" Parameters="/add &quot;%1&quot;" MultiSelectModel="Document">Añadir a la lista de MiauPlayer</uap3:Verb>
+                <uap3:Verb Id="open" Parameters="&quot;%1&quot;" MultiSelectModel="Player">ms-resource:VerbOpen</uap3:Verb>
               </uap2:SupportedVerbs>
             </uap3:FileTypeAssociation>
           </uap3:Extension>
@@ -102,11 +104,159 @@
               <uap:FileType>.mts</uap:FileType>
               </uap:SupportedFileTypes>
               <uap2:SupportedVerbs>
-                <uap3:Verb Id="open" Parameters="&quot;%1&quot;" MultiSelectModel="Player">Abrir con MiauPlayer</uap3:Verb>
-                <uap3:Verb Id="MiauAdd" Parameters="/add &quot;%1&quot;" MultiSelectModel="Document">Añadir a la lista de MiauPlayer</uap3:Verb>
+                <uap3:Verb Id="open" Parameters="&quot;%1&quot;" MultiSelectModel="Player">ms-resource:VerbOpen</uap3:Verb>
               </uap2:SupportedVerbs>
             </uap3:FileTypeAssociation>
           </uap3:Extension>
+          <desktop4:Extension Category="windows.fileExplorerContextMenus">
+            <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type=".mp3">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mp2">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mp1">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".aac">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".m4a">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".m4b">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".flac">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".ogg">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".oga">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".opus">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".wav">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".aif">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".aiff">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".aifc">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".ape">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".tta">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".wv">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mpc">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".wma">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".ac3">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".eac3">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".dts">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mka">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".caf">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".dsf">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".dff">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".amr">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".au">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".w64">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".wave">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mp4">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mov">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mkv">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".wmv">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".asf">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".avi">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".webm">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mpg">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mpeg">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".m4v">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".flv">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".3gp">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".ogv">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".vob">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".m2ts">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type=".mts">
+              <desktop5:Verb Id="MiauAdd" Clsid="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" />
+            </desktop5:ItemType>
+            </desktop4:FileExplorerContextMenus>
+          </desktop4:Extension>
+          <com:Extension Category="windows.comServer">
+            <com:ComServer>
+              <com:SurrogateServer DisplayName="MiauPlayer - Add to playlist">
+                <com:Class Id="5B0C6E2A-8D3F-4E71-9C54-2A7F1B6D8E30" Path="MiauShell.dll" ThreadingModel="STA" />
+              </com:SurrogateServer>
+            </com:ComServer>
+          </com:Extension>
       </Extensions>
     </Application>
   </Applications>

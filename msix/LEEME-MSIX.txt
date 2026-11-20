@@ -1,11 +1,11 @@
-MiauPlayer 1.7.12 - paquete MSIX para Microsoft Store
+MiauPlayer 1.7.13 - paquete MSIX para Microsoft Store
 =====================================================
 Identidad (de Partner Center): ia21.MiauPlayer / CN=99EC47F4-46C8-451A-8D0C-554779C4B800 / ia21
 Ya esta puesta en Paquete\AppxManifest.xml. No la cambies: debe coincidir con Partner Center.
 
 1) EMPAQUETAR (Windows)
    - Instala el Windows SDK (trae makeappx y signtool).
-   - Doble clic en empaquetar.bat  ->  crea MiauPlayer-1.7.12.0-x64.msix (SIN firmar).
+   - Doble clic en empaquetar.bat  ->  crea MiauPlayer-1.7.13.0-x64.msix (SIN firmar).
    - Ese es el archivo que se sube a Partner Center. El Store lo firma por ti al certificar.
 
 2) PROBAR ANTES DE SUBIR (recomendado)
@@ -17,14 +17,34 @@ Ya esta puesta en Paquete\AppxManifest.xml. No la cambies: debe coincidir con Pa
    - Si no hay Windows SDK en tu equipo, puedes saltarte la prueba y subir el .msix; pero la prueba evita rechazos.
 
 3) PARTNER CENTER
-   - Producto > Iniciar envio > Paquetes: arrastra MiauPlayer-1.7.12.0-x64.msix.
+   - Producto > Iniciar envio > Paquetes: arrastra MiauPlayer-1.7.13.0-x64.msix.
    - Textos de la ficha y notas de certificacion: ver textos-tienda.txt.
    - Politica de privacidad: sube PRIVACY.md a tu GitHub y pega la direccion (carpeta del GitHub).
    - Logotipo de la tienda (caja 1:1): sube un PNG cuadrado de 1080x1080 del original del logo
      (los iconos de este paquete salen de un .ico de 256 px y se verian borrosos en tamano grande).
 
+Menu contextual "Anadir a la lista de MiauPlayer" (sin limite de 15 archivos)
+   - Lo da MiauShell.dll (comando IExplorerCommand, codigo en MiauShell.cpp). Va dentro de Paquete\ y se registra en el
+     manifiesto (desktop4/desktop5 + com:SurrogateServer). Explorer le entrega TODA la seleccion de una vez y la DLL la
+     envia a MiauPlayer (si no esta abierto, lo inicia).
+   - Compilar la DLL (MinGW-w64):
+       g++ -std=c++17 -O2 -DUNICODE -D_UNICODE -shared -static -static-libgcc -static-libstdc++ MiauShell.cpp -o MiauShell.dll -lole32 -lshlwapi -lshell32 -luuid -luser32
+   - Si el comando no apareciera en algun Windows, usa respaldo\AppxManifest-solo-verbos-clasicos.xml (copialo sobre
+     Paquete\AppxManifest.xml y borra Paquete\MiauShell.dll): vuelve al verbo clasico, limitado a 15 archivos.
+   - Para probar el paquete sin chocar con la version de la Store: .\prueba-local-2.ps1 (usa identidad de prueba).
+
+Iconos de la barra de tareas
+   - empaquetar.bat ejecuta makepri (del Windows SDK) para crear Paquete\resources.pri antes de empaquetar. Sin ese indice
+     Windows no usa las variantes de icono (targetsize / altform-unplated) y dibuja el icono pequeno sobre una placa azul.
+
+Textos traducidos del menu contextual
+   - "Abrir con MiauPlayer" sale de Paquete\Strings\<idioma>\Resources.resw (es-ES, en-US, pt-BR) y el manifiesto lo
+     referencia como ms-resource:VerbOpen. Requiere resources.pri (lo crea empaquetar.bat).
+   - Si en algun Windows el texto saliera como "ms-resource:VerbOpen" o el paquete no instalara, usa
+     respaldo\AppxManifest-solo-verbos-clasicos.xml (texto fijo en espanol).
+
 Notas del paquete
-   - Version del paquete: 1.7.12.0 (el Store pide 4 numeros). En cada actualizacion sube la version.
+   - Version del paquete: 1.7.13.0 (el Store pide 4 numeros). En cada actualizacion sube la version.
    - Extensiones declaradas: 46 (las mismas que el instalador, incluido wma). Windows las ofrece como opcion
      al usuario en "Abrir con"; MiauPlayer no se impone como predeterminado.
    - En el paquete no se pregunta por asociar archivos: el menu Configuracion > "Asociar tipos de archivo"

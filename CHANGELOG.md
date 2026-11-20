@@ -1,5 +1,10 @@
 # Cambios
 
+## 1.7.13
+- Paquete MSIX (Microsoft Store): el menu contextual "Anadir a la lista de MiauPlayer" ahora es un comando de shell (IExplorerCommand, MiauShell.dll) que recibe toda la seleccion de una vez, asi que ya no hay limite de 15 archivos. Si MiauPlayer no esta abierto, lo inicia con la primera pista y envia el resto. El instalador normal no cambia (ya no tenia ese limite). Se conserva un manifiesto de respaldo con los verbos clasicos.
+- Paquete MSIX: el empaquetado genera ahora resources.pri (makepri) e incluye mas tamanos de icono sin placa, para que el icono de la barra de tareas ocupe todo el espacio en vez de verse pequeno sobre un cuadro azul.
+- Paquete MSIX: el texto "Abrir con MiauPlayer" del menu contextual se traduce segun el idioma de Windows (espanol, ingles, portugues) mediante Strings\<idioma>\Resources.resw. En el instalador normal ya estaba traducido.
+
 ## 1.7.12
 - Mas espacio para el video: la interfaz es mas compacta en altura (barra de titulo, franja de botones, filas de volumen y ganancia, ecualizador y forma de onda). No se quito ninguna opcion; solo se redujeron alturas de filas, sliders e iconos. La misma presentacion mas baja se ve tambien al reproducir audio. La altura minima de la ventana baja de 600 a 560 y la inicial de 660 a 590.
 - Informacion de la pista (clic derecho): ahora muestra el tamano del archivo (y los bytes exactos) y la ruta completa. La ruta se parte en varias lineas, preferentemente tras una barra, para que la ventana no se ensanche.
