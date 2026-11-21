@@ -142,6 +142,15 @@ static const TrEntry kTr[] = {
     { L"La lista actual est\u00e1 vac\u00eda, no hay nada que exportar.",
       L"The current list is empty, there is nothing to export.",
       L"A lista atual est\u00e1 vazia, n\u00e3o h\u00e1 nada para exportar." },
+    { L"Lista nueva (vac\u00eda la lista actual)",
+      L"New list (clears the current list)",
+      L"Nova lista (limpa a lista atual)" },
+    { L"La lista actual no est\u00e1 guardada. \u00bfCrear una lista nueva y descartarla?",
+      L"The current list is not saved. Create a new list and discard it?",
+      L"A lista atual n\u00e3o est\u00e1 salva. Criar uma nova lista e descart\u00e1-la?" },
+    { L"Lista nueva", L"New list", L"Nova lista" },
+    { L"Esta es una lista guardada (\u201c", L"This is a saved list (\u201c", L"Esta \u00e9 uma lista salva (\u201c" },
+    { L"\u201d). \u00bfSeguro que deseas vaciar la lista?", L"\u201d). Are you sure you want to clear the list?", L"\u201d). Tem certeza de que deseja esvaziar a lista?" },
     { L"Exportar la lista actual a .txt",
       L"Export the current list to .txt",
       L"Exportar a lista atual para .txt" },
@@ -487,6 +496,27 @@ static const TrEntry kTr[] = {
     { L"desconocido",
       L"unknown",
       L"desconhecido" },
+    { L"Listas: ",
+      L"Lists: ",
+      L"Listas: " },
+    { L"Cambiar carpeta de listas\u2026",
+      L"Change playlists folder\u2026",
+      L"Alterar pasta das listas\u2026" },
+    { L"Usar la carpeta de listas predeterminada",
+      L"Use the default playlists folder",
+      L"Usar a pasta de listas padr\u00e3o" },
+    { L"Elige la carpeta donde se guardar\u00e1n las listas de reproducci\u00f3n",
+      L"Choose the folder where playlists will be saved",
+      L"Escolha a pasta onde as listas de reprodu\u00e7\u00e3o ser\u00e3o salvas" },
+    { L"\u00bfCopiar a la nueva carpeta las listas guardadas actuales?\n\nNo se sobrescribir\u00e1n las listas que ya existan all\u00ed.",
+      L"Copy the current saved playlists to the new folder?\n\nPlaylists that already exist there will not be overwritten.",
+      L"Copiar as listas salvas atuais para a nova pasta?\n\nAs listas que j\u00e1 existirem l\u00e1 n\u00e3o ser\u00e3o sobrescritas." },
+    { L"No se pudo usar esa carpeta.",
+      L"That folder could not be used.",
+      L"N\u00e3o foi poss\u00edvel usar essa pasta." },
+    { L"La carpeta de listas elegida no est\u00e1 disponible; se usa la carpeta predeterminada:\n",
+      L"The chosen playlists folder is not available; the default folder is being used:\n",
+      L"A pasta de listas escolhida n\u00e3o est\u00e1 dispon\u00edvel; est\u00e1 sendo usada a pasta padr\u00e3o:\n" },
     { L"Tama\u00f1o",
       L"Size",
       L"Tamanho" },
@@ -802,7 +832,7 @@ enum {
     ID_OPEN = 100, ID_FOLDER, ID_PREV, ID_PLAY, ID_STOP, ID_NEXT, ID_RESET,
     ID_GAIN, ID_BASS, ID_MID, ID_TREBLE, ID_LIMIT, ID_LIST,
     ID_TIME, ID_GAINTXT, ID_PEAKTXT, ID_EQTXT0, ID_EQTXT1, ID_EQTXT2,
-    ID_VOL, ID_VOLTXT, ID_MUTE, ID_PEAKON, ID_LISTBTN, ID_OUTBTN, ID_SPEED, ID_SPDRESET, ID_SPD, ID_PLLIST, ID_PLSAVE, ID_PLIMP, ID_PLEXP, ID_ABOUT, ID_NETURL, ID_SNAP, ID_SNAPDIR, ID_SNAPOPT
+    ID_VOL, ID_VOLTXT, ID_MUTE, ID_PEAKON, ID_LISTBTN, ID_OUTBTN, ID_SPEED, ID_SPDRESET, ID_SPD, ID_PLLIST, ID_PLSAVE, ID_PLIMP, ID_PLEXP, ID_PLNEW, ID_ABOUT, ID_NETURL, ID_SNAP, ID_SNAPDIR, ID_SNAPOPT
 };
 static const int OUT_RATE = 48000;   // solo para el modo de respaldo y los videos sin audio
 #ifndef WAVE_FORMAT_IEEE_FLOAT
@@ -812,7 +842,7 @@ static const int OUT_RATE = 48000;   // solo para el modo de respaldo y los vide
 static HWND g_hwnd, g_list, g_gain, g_eq[3], g_limit, g_time, g_gainTxt, g_peakTxt, g_eqTxt[3];
 static HWND g_vol, g_volTxt, g_mute, g_peakChk, g_spd;
 static bool g_spdOpen = false;                 // panel de velocidad abierto
-static HWND g_plList, g_plSave, g_plImp, g_plExp;                // columna derecha: playlists guardadas + boton guardar
+static HWND g_plList, g_plSave, g_plImp, g_plExp, g_plNew;                // columna derecha: playlists guardadas + boton guardar
 static bool g_panelFloating = false;          // panel de listas flotante sobre el video
 static DWORD g_outMenuClosedOnBtn = 0;
 static DWORD g_optMenuClosedOnBtn = 0;         // idem para el menu de opciones de captura         // el menu de salida se cerro con un clic sobre su propio boton
@@ -1766,7 +1796,7 @@ static void fillRect(HDC dc, const RECT& r, COLORREF c) {
     DeleteObject(b);
 }
 
-enum { ICO_FILE, ICO_FOLDER, ICO_PREV, ICO_NEXT, ICO_STOP, ICO_PLAY, ICO_LIST, ICO_SPK, ICO_PAUSE, ICO_SAVE, ICO_IMPORT, ICO_EXPORT, ICO_INFO, ICO_CLOUD, ICO_FSEXIT, ICO_FSENTER, ICO_CAMERA, ICO_GEAR };
+enum { ICO_FILE, ICO_FOLDER, ICO_PREV, ICO_NEXT, ICO_STOP, ICO_PLAY, ICO_LIST, ICO_SPK, ICO_PAUSE, ICO_SAVE, ICO_IMPORT, ICO_EXPORT, ICO_INFO, ICO_CLOUD, ICO_FSEXIT, ICO_FSENTER, ICO_CAMERA, ICO_GEAR, ICO_NEWLIST };
 
 static void drawIcon(Graphics& g, int kind, float x, float y, float s, COLORREF col) {
     SolidBrush b(Col(col));
@@ -1887,6 +1917,16 @@ static void drawIcon(Graphics& g, int kind, float x, float y, float s, COLORREF 
         g.DrawLine(&tp, x + s * 0.5f, y + s * (in ? 0.10f : 0.66f), x + s * 0.5f, y + s * (in ? 0.66f : 0.10f));
         PointF head[3] = { { x + s * 0.28f, y + s * (in ? 0.46f : 0.30f) }, { x + s * 0.5f, y + s * (in ? 0.68f : 0.08f) }, { x + s * 0.72f, y + s * (in ? 0.46f : 0.30f) } };
         g.DrawLines(&tp, head, 3);
+        break;
+    }
+    case ICO_NEWLIST: {   // hoja en blanco con esquina doblada
+        Pen tp(Col(col), s * 0.10f);
+        tp.SetStartCap(Gdiplus::LineCapRound); tp.SetEndCap(Gdiplus::LineCapRound); tp.SetLineJoin(Gdiplus::LineJoinRound);
+        PointF pg[5] = { { x + s * 0.60f, y + s * 0.10f }, { x + s * 0.20f, y + s * 0.10f }, { x + s * 0.20f, y + s * 0.90f }, { x + s * 0.80f, y + s * 0.90f }, { x + s * 0.80f, y + s * 0.30f } };
+        g.DrawLines(&tp, pg, 5);
+        g.DrawLine(&tp, x + s * 0.60f, y + s * 0.10f, x + s * 0.80f, y + s * 0.30f);
+        PointF fold[3] = { { x + s * 0.60f, y + s * 0.10f }, { x + s * 0.60f, y + s * 0.30f }, { x + s * 0.80f, y + s * 0.30f } };
+        g.DrawLines(&tp, fold, 3);   // esquina doblada
         break;
     }
     case ICO_SAVE: {
@@ -2081,7 +2121,7 @@ static void drawButton(const DRAWITEMSTRUCT* di) {
     const bool toolbar = (id >= ID_OPEN && id <= ID_NEXT) || id == ID_LISTBTN || id == ID_OUTBTN || id == ID_SPEED;
     wchar_t txt[64] = L"";
     GetWindowText(di->hwndItem, txt, 64);
-    const bool hdrBtn = id == ID_PLSAVE || id == ID_PLIMP || id == ID_PLEXP;
+    const bool hdrBtn = id == ID_PLSAVE || id == ID_PLIMP || id == ID_PLEXP || id == ID_PLNEW;
     { Neon n0; if (!neonFor(id, n0)) fillRect(dc, r, toolbar ? C_BAND : (hdrBtn ? RGB(226, 229, 234) : C_BG)); }
     const float x = r.left + 0.5f, y = r.top + 0.5f, w = (float)(r.right - r.left) - 1.f, h = (float)(r.bottom - r.top) - 1.f;
 
@@ -2094,7 +2134,7 @@ static void drawButton(const DRAWITEMSTRUCT* di) {
             SolidBrush hb(Col(down ? RGB(196, 201, 208) : RGB(211, 215, 221)));
             g.FillPath(&hb, &hp);
         }
-        const int ic = id == ID_PLIMP ? ICO_IMPORT : id == ID_PLEXP ? ICO_EXPORT : ICO_SAVE;
+        const int ic = id == ID_PLNEW ? ICO_NEWLIST : id == ID_PLIMP ? ICO_IMPORT : id == ID_PLEXP ? ICO_EXPORT : ICO_SAVE;
         const float is = 18.f;
         drawIcon(g, ic, x + (w - is) / 2, y + (h - is) / 2, is, id == ID_PLSAVE ? RGB(214, 48, 60) : RGB(58, 63, 71));
         g.Flush();
@@ -2386,7 +2426,12 @@ static bool isPackaged() {
     return v == 1;
 }
 
-static std::wstring plDir() {   // <carpeta del programa>\playlists (si no se puede escribir ahi: %APPDATA%\MiauPlayer\playlists)
+static std::wstring g_plCustom;          // carpeta de listas elegida por el usuario ("" = la predeterminada)
+static std::wstring g_plDirCache;        // carpeta de listas en uso (se recalcula al cambiarla)
+static bool g_plFellBack = false;        // la carpeta elegida no estaba disponible y se uso la predeterminada
+static bool g_plFellBackShown = false;
+
+static std::wstring defaultPlDir() {   // <carpeta del programa>\playlists (si no se puede escribir ahi: %APPDATA%\MiauPlayer\playlists)
     static std::wstring d;
     if (!d.empty()) return d;
     if (isPackaged()) {   // en el paquete MSIX no se puede escribir junto al ejecutable: Documentos\MiauPlayer\playlist
@@ -2413,6 +2458,23 @@ static std::wstring plDir() {   // <carpeta del programa>\playlists (si no se pu
         return d = b;
     }
     return d = a;
+}
+
+static bool dirExists(const std::wstring& d) {
+    const DWORD a = GetFileAttributesW(d.c_str());
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+}
+
+// Carpeta de las listas guardadas: la que eligio el usuario (por ejemplo dentro de Dropbox) o, si no existe / no se puede
+// crear (disco desconectado, Dropbox cerrado...), la predeterminada.
+static std::wstring plDir() {
+    if (!g_plDirCache.empty()) return g_plDirCache;
+    if (!g_plCustom.empty()) {
+        if (!dirExists(g_plCustom)) SHCreateDirectoryExW(nullptr, g_plCustom.c_str(), nullptr);
+        if (dirExists(g_plCustom)) return g_plDirCache = g_plCustom;
+        g_plFellBack = true;
+    }
+    return g_plDirCache = defaultPlDir();
 }
 
 static std::wstring plPath(const std::wstring& name) { return plDir() + L"\\" + name + L".txt"; }
@@ -2450,6 +2512,12 @@ static void fillSavedListBox() {
 }
 
 static void refreshSavedLists() {
+    const std::wstring dirNow = plDir();
+    if (g_plFellBack && !g_plFellBackShown) {
+        g_plFellBackShown = true;
+        MessageBoxW(g_hwnd, (std::wstring(TX(L"La carpeta de listas elegida no est\u00e1 disponible; se usa la carpeta predeterminada:\n")) + dirNow).c_str(),
+                    L"MiauPlayer", MB_OK | MB_ICONINFORMATION);
+    }
     g_savedNames.clear();
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((plDir() + L"\\*.txt").c_str(), &fd);
@@ -2638,6 +2706,9 @@ static void loadCaptureDir() {
         wchar_t b[MAX_PATH * 2] = L"";
         DWORD sz = sizeof(b) - sizeof(wchar_t), ty = 0;
         if (RegQueryValueExW(k, L"CaptureDir", nullptr, &ty, (BYTE*)b, &sz) == ERROR_SUCCESS && ty == REG_SZ) g_capDir = b;
+        wchar_t b2[MAX_PATH * 2] = L"";
+        DWORD sz2 = sizeof(b2) - sizeof(wchar_t), ty2 = 0;
+        if (RegQueryValueExW(k, L"PlaylistDir", nullptr, &ty2, (BYTE*)b2, &sz2) == ERROR_SUCCESS && ty2 == REG_SZ) g_plCustom = b2;
         RegCloseKey(k);
     }
 }
@@ -2646,6 +2717,14 @@ static void saveCaptureDir() {
     if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\MiauPlayer", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
     if (g_capDir.empty()) RegDeleteValueW(k, L"CaptureDir");
     else RegSetValueExW(k, L"CaptureDir", 0, REG_SZ, (const BYTE*)g_capDir.c_str(), (DWORD)((g_capDir.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(k);
+}
+
+static void savePlDirSetting() {
+    HKEY k;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\MiauPlayer", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &k, nullptr) != ERROR_SUCCESS) return;
+    if (g_plCustom.empty()) RegDeleteValueW(k, L"PlaylistDir");
+    else RegSetValueExW(k, L"PlaylistDir", 0, REG_SZ, (const BYTE*)g_plCustom.c_str(), (DWORD)((g_plCustom.size() + 1) * sizeof(wchar_t)));
     RegCloseKey(k);
 }
 
@@ -2672,6 +2751,70 @@ static void changeCaptureDir() {
         g_lastCapture.clear();
     }
     CoTaskMemFree(pidl);
+}
+
+static bool hasListFiles(const std::wstring& dir) {
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*.txt").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    FindClose(h);
+    return true;
+}
+
+// Copia las listas (*.txt) y el orden manual (orden.lst) sin pisar las que ya existan en el destino.
+static void copyListFiles(const std::wstring& from, const std::wstring& to) {
+    const wchar_t* pats[] = { L"\\*.txt", L"\\orden.lst" };
+    for (const wchar_t* pat : pats) {
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((from + pat).c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) continue;
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            CopyFileW((from + L"\\" + fd.cFileName).c_str(), (to + L"\\" + fd.cFileName).c_str(), TRUE);
+        } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+}
+
+static void applyPlaylistDir(const std::wstring& np) {   // "" = volver a la predeterminada
+    g_plCustom = np;
+    g_plDirCache.clear();
+    g_plFellBack = false;
+    savePlDirSetting();
+    refreshSavedLists();
+}
+
+static void changePlaylistDir() {
+    const std::wstring old = plDir();
+    wchar_t disp[MAX_PATH] = L"";
+    BROWSEINFOW bi = {};
+    bi.hwndOwner = g_hwnd;
+    bi.pszDisplayName = disp;
+    bi.lpszTitle = TX(L"Elige la carpeta donde se guardar\u00e1n las listas de reproducci\u00f3n");
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    bi.lpfn = browseCb;
+    bi.lParam = (LPARAM)old.c_str();
+    PIDLIST_ABSOLUTE pidl = SHBrowseForFolderW(&bi);
+    if (!pidl) return;
+    wchar_t path[MAX_PATH] = L"";
+    const bool got = SHGetPathFromIDListW(pidl, path) && path[0];
+    CoTaskMemFree(pidl);
+    if (!got) return;
+    std::wstring np = path;
+    while (np.size() > 3 && np.back() == L'\\') np.pop_back();
+    if (_wcsicmp(np.c_str(), old.c_str()) == 0) return;
+    if (!dirExists(np)) SHCreateDirectoryExW(nullptr, np.c_str(), nullptr);
+    if (!dirExists(np)) {
+        MessageBoxW(g_hwnd, TX(L"No se pudo usar esa carpeta."), L"MiauPlayer", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (hasListFiles(old)) {
+        const int r = MessageBoxW(g_hwnd, TX(L"\u00bfCopiar a la nueva carpeta las listas guardadas actuales?\n\nNo se sobrescribir\u00e1n las listas que ya existan all\u00ed."),
+                                  L"MiauPlayer", MB_YESNOCANCEL | MB_ICONQUESTION);
+        if (r == IDCANCEL) return;
+        if (r == IDYES) copyListFiles(old, np);
+    }
+    applyPlaylistDir(_wcsicmp(np.c_str(), defaultPlDir().c_str()) == 0 ? std::wstring() : np);
 }
 
 static void openCaptureFolder() {   // abre la carpeta; si hay una captura reciente en ella, la deja seleccionada
@@ -2784,6 +2927,14 @@ static void showCaptureOptions() {
     if (!g_capDir.empty()) AppendMenu(m, MF_STRING, 3, TX(L"Usar la carpeta predeterminada"));
     AppendMenu(m, MF_SEPARATOR, 0, nullptr);
     {
+        std::wstring pl = plDir();
+        if (pl.size() > 56) pl = L"\u2026" + pl.substr(pl.size() - 55);
+        AppendMenu(m, MF_STRING | MF_GRAYED, 5, (std::wstring(TX(L"Listas: ")) + pl).c_str());
+        AppendMenu(m, MF_STRING, 6, TX(L"Cambiar carpeta de listas\u2026"));
+        if (!g_plCustom.empty()) AppendMenu(m, MF_STRING, 7, TX(L"Usar la carpeta de listas predeterminada"));
+    }
+    AppendMenu(m, MF_SEPARATOR, 0, nullptr);
+    {
         const int sel = g_langPending >= 0 ? g_langPending : g_lang;
         HMENU lm = CreatePopupMenu();
         AppendMenu(lm, MF_STRING | (sel == LNG_ES ? MF_CHECKED : 0), 10, L"Espa\u00f1ol");
@@ -2809,6 +2960,8 @@ static void showCaptureOptions() {
     if (cmd == 2) changeCaptureDir();
     else if (cmd == 3) { g_capDir.clear(); saveCaptureDir(); g_lastCapture.clear(); }
     else if (cmd == 4) associateFileTypes();
+    else if (cmd == 6) changePlaylistDir();
+    else if (cmd == 7) applyPlaylistDir(std::wstring());
     else if (cmd >= 20 && cmd <= 22) { g_rgMode = cmd - 20; regSetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"ReplayGain", (DWORD)(cmd - 20)); }
     else if (cmd >= 10 && cmd <= 12) setLanguagePref(cmd - 10);   // 10 = es, 11 = en, 12 = pt (ver LNG_*)
 }
@@ -2904,13 +3057,16 @@ static void doSavePlaylist() {
         return;
     }
     std::wstring name = g_loadedPl;
-    if (!promptName(TX(L"Guardar playlist"), TX(L"Nombre de la playlist:"), name)) return;
-    name = sanitizeName(name);
-    if (name.empty()) {
-        MessageBoxW(g_hwnd, TX(L"El nombre no es v\u00e1lido."), L"MiauPlayer", MB_OK | MB_ICONWARNING);
-        return;
+    const bool known = !name.empty();   // lista ya guardada: se actualiza directamente, sin preguntas
+    if (!known) {
+        if (!promptName(TX(L"Guardar playlist"), TX(L"Nombre de la playlist:"), name)) return;
+        name = sanitizeName(name);
+        if (name.empty()) {
+            MessageBoxW(g_hwnd, TX(L"El nombre no es v\u00e1lido."), L"MiauPlayer", MB_OK | MB_ICONWARNING);
+            return;
+        }
     }
-    if (GetFileAttributesW(plPath(name).c_str()) != INVALID_FILE_ATTRIBUTES &&
+    if (!known && GetFileAttributesW(plPath(name).c_str()) != INVALID_FILE_ATTRIBUTES &&
         MessageBoxW(g_hwnd, TX(L"Ya existe una playlist con ese nombre. \u00bfReemplazarla?"), L"MiauPlayer", MB_YESNO | MB_ICONQUESTION) != IDYES)
         return;
     if (!writePlaylistFile(name)) {
@@ -2947,7 +3103,7 @@ static void doImportPlaylist() {
     if (GetFileAttributesW(plPath(name).c_str()) != INVALID_FILE_ATTRIBUTES &&
         MessageBoxW(g_hwnd, (TX(L"Ya existe una playlist llamada \u201c") + name + TX(L"\u201d. \u00bfReemplazarla?")).c_str(), L"MiauPlayer", MB_YESNO | MB_ICONQUESTION) != IDYES)
         return;
-    if (!writeLinesFile(plPath(name), lines)) {
+    if (!writeLinesFile(plPath(name), portableLines(lines))) {
         MessageBoxW(g_hwnd, (TX(L"No se pudo guardar el archivo en:\n") + plDir()).c_str(), L"MiauPlayer", MB_OK | MB_ICONERROR);
         return;
     }
@@ -3100,6 +3256,15 @@ static void clearPlaylist() {
     updateTitle();
     relayout();
     InvalidateRect(g_hwnd, nullptr, FALSE);
+}
+
+static void doNewList() {   // lista nueva: vacia la lista actual (las guardadas no se tocan)
+    if (g_playlist.empty()) { g_loadedPl.clear(); if (g_plList) SendMessage(g_plList, LB_SETCURSEL, (WPARAM)-1, 0); return; }
+    if (g_loadedPl.empty() &&
+        MessageBoxW(g_hwnd, TX(L"La lista actual no est\u00e1 guardada. \u00bfCrear una lista nueva y descartarla?"), L"MiauPlayer", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        return;
+    clearPlaylist();
+    if (g_plList) SendMessage(g_plList, LB_SETCURSEL, (WPARAM)-1, 0);
 }
 
 // ---- arrastrar con el mouse para cambiar el orden (lista actual y listas guardadas)
@@ -3465,7 +3630,7 @@ static void layout(int w, int h) {
     if (video && !g_listFloat) {
         ShowWindow(g_list, SW_HIDE);
         ShowWindow(g_plList, SW_HIDE);
-        ShowWindow(g_plSave, SW_HIDE); ShowWindow(g_plImp, SW_HIDE); ShowWindow(g_plExp, SW_HIDE);
+        ShowWindow(g_plNew, SW_HIDE); ShowWindow(g_plSave, SW_HIDE); ShowWindow(g_plImp, SW_HIDE); ShowWindow(g_plExp, SW_HIDE);
         g_panelRect = { 0, 0, 0, 0 };
     } else {
         RECT pr;
@@ -3491,12 +3656,13 @@ static void layout(int w, int h) {
             int bx = mid - 10 - bsz;
             moveCtl(g_plSave, bx, byy, bsz, bsz, TRUE); bx -= bsz + 2;
             moveCtl(g_plExp, bx, byy, bsz, bsz, TRUE);  bx -= bsz + 2;
-            moveCtl(g_plImp, bx, byy, bsz, bsz, TRUE);
+            moveCtl(g_plImp, bx, byy, bsz, bsz, TRUE);  bx -= bsz + 2;
+            moveCtl(g_plNew, bx, byy, bsz, bsz, TRUE);
         }
         ShowWindow(g_list, SW_SHOW); ShowWindow(g_plList, SW_SHOW);
-        ShowWindow(g_plSave, SW_SHOW); ShowWindow(g_plImp, SW_SHOW); ShowWindow(g_plExp, SW_SHOW);
+        ShowWindow(g_plNew, SW_SHOW); ShowWindow(g_plSave, SW_SHOW); ShowWindow(g_plImp, SW_SHOW); ShowWindow(g_plExp, SW_SHOW);
         BringWindowToTop(g_list); BringWindowToTop(g_plList);
-        BringWindowToTop(g_plSave); BringWindowToTop(g_plImp); BringWindowToTop(g_plExp);
+        BringWindowToTop(g_plNew); BringWindowToTop(g_plSave); BringWindowToTop(g_plImp); BringWindowToTop(g_plExp);
     }
     if (g_hasVideo) rescaleLastFrame();
     // repintar ventana y TODOS los controles hijos: al mover/redimensionar controles Windows copia pixeles
@@ -4260,7 +4426,7 @@ static void onTimer() {
 }
 
 // ------------------------------------------------------------ ventana "Acerca de"
-#define APP_VERSION L"1.7.13"
+#define APP_VERSION L"1.7.17"
 static const wchar_t* kAboutClass = L"MiauAbout";
 static const wchar_t* kSiteUrl = L"https://ia21.cc";
 static const wchar_t* kKofiUrl = L"https://ko-fi.com/miauapps";
@@ -4738,7 +4904,12 @@ static LRESULT CALLBACK ListProc(HWND h, UINT m, WPARAM w, LPARAM l, UINT_PTR, D
         DestroyMenu(mn);
         if (cmd == 1) { g_listFloat = false; playIndex(idx); }
         else if (cmd == 2) removeTrack(idx);
-        else if (cmd == 3) clearPlaylist();
+        else if (cmd == 3) {
+            if (g_loadedPl.empty() ||
+                MessageBoxW(g_hwnd, (std::wstring(TX(L"Esta es una lista guardada (\u201c")) + g_loadedPl + TX(L"\u201d). \u00bfSeguro que deseas vaciar la lista?")).c_str(),
+                            L"MiauPlayer", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES)
+                clearPlaylist();
+        }
         else if (cmd == 4) openTrackLocation(idx);
         else if (cmd == 5) showTrackInfo(idx);
         return 0;
@@ -4851,6 +5022,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         mkBtn(h, TX(L"Abrir carpeta de capturas"), ID_SNAPDIR, 0, 34);
         mkBtn(h, TX(L"Configuración"), ID_SNAPOPT, 0, 34);
         mkBtn(h, TX(L"Abrir ruta de red"), ID_NETURL, 0, 38);
+        g_plNew = mkBtn(h, TX(L"Lista nueva"), ID_PLNEW, 0, 28);
         g_plImp = mkBtn(h, TX(L"Importar"), ID_PLIMP, 0, 28);
         g_plExp = mkBtn(h, TX(L"Exportar"), ID_PLEXP, 0, 28);
         g_plSave = mkBtn(h, TX(L"Guardar playlist"), ID_PLSAVE, 0, 28);
@@ -4863,7 +5035,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         {
             HWND tip = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, nullptr, WS_POPUP | TTS_ALWAYSTIP, 0, 0, 0, 0, h, nullptr, nullptr, nullptr);
             struct TipDef { int id; const wchar_t* t; } tt[] = { { ID_OPEN, TX(L"Abrir archivos") }, { ID_STOP, TX(L"Detener") }, { ID_PREV, TX(L"Anterior") }, { ID_NEXT, TX(L"Siguiente") },
-                { ID_PLSAVE, TX(L"Guardar la lista actual como playlist") }, { ID_SNAP, TX(L"Capturar fotograma") }, { ID_SNAPDIR, TX(L"Abrir carpeta de capturas") }, { ID_SNAPOPT, TX(L"Configuración") }, { ID_ABOUT, TX(L"Acerca de MiauPlayer") }, { ID_NETURL, TX(L"Abrir ruta de red (RTSP, HTTP\u2026)") }, { ID_PLIMP, TX(L"Importar playlist (.txt)") }, { ID_PLEXP, TX(L"Exportar la lista actual a .txt") }, { ID_FOLDER, TX(L"Abrir carpeta") }, { ID_PLAY, TX(L"Reproducir / Pausa") },
+                { ID_PLSAVE, TX(L"Guardar la lista actual como playlist") }, { ID_SNAP, TX(L"Capturar fotograma") }, { ID_SNAPDIR, TX(L"Abrir carpeta de capturas") }, { ID_SNAPOPT, TX(L"Configuración") }, { ID_ABOUT, TX(L"Acerca de MiauPlayer") }, { ID_NETURL, TX(L"Abrir ruta de red (RTSP, HTTP\u2026)") }, { ID_PLNEW, TX(L"Lista nueva (vac\u00eda la lista actual)") }, { ID_PLIMP, TX(L"Importar playlist (.txt)") }, { ID_PLEXP, TX(L"Exportar la lista actual a .txt") }, { ID_FOLDER, TX(L"Abrir carpeta") }, { ID_PLAY, TX(L"Reproducir / Pausa") },
                 { ID_LISTBTN, TX(L"Lista de reproducci\u00f3n") }, { ID_OUTBTN, TX(L"Salida de audio") }, { ID_SPEED, TX(L"Velocidad de reproducci\u00f3n") } };
             if (tip)
                 for (auto& e : tt) {
@@ -5224,6 +5396,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         case ID_SNAPDIR: openCaptureFolder(); break;
         case ID_SNAPOPT: if (GetTickCount() - g_optMenuClosedOnBtn > 500) showCaptureOptions(); break;
         case ID_PLIMP: doImportPlaylist(); break;
+        case ID_PLNEW: doNewList(); break;
         case ID_PLEXP: doExportCurrent(); break;
         case ID_LISTBTN: g_listFloat = !g_listFloat; relayout(); break;
         case ID_PEAKON: g_peakOn = !g_peakOn.load(); InvalidateRect(g_peakChk, nullptr, FALSE); break;

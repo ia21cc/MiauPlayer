@@ -1,4 +1,4 @@
-MiauPlayer 1.7.13
+MiauPlayer 1.7.17
 Usa FFmpeg N-128837-g986bab2b47-20261112 (build "master" de BtbN, win64 lgpl-shared, licencia LGPL v3). Licencia de FFmpeg: FFMPEG-LICENSE.txt
 FFmpeg viene como bibliotecas DLL independientes (avcodec, avformat, avfilter, avutil, swresample, swscale), sin modificar. Puedes reemplazarlas por otra version compatible de FFmpeg (misma serie de numeros de DLL, por ejemplo avcodec-63.dll) copiandolas en esta carpeta.
 Codigo fuente de FFmpeg: https://ffmpeg.org/download.html  (builds: https://github.com/BtbN/FFmpeg-Builds)

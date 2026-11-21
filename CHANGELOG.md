@@ -1,5 +1,19 @@
 # Cambios
 
+## 1.7.17
+- Icono de "Lista nueva" mas sencillo: hoja en blanco con la esquina doblada, sin el signo +.
+
+## 1.7.16
+- "Limpiar toda la lista" (menu contextual de la lista): si la lista actual es una lista guardada, ahora muestra una advertencia ("Esta es una lista guardada... Seguro que deseas vaciar la lista?") con "No" como opcion predeterminada. Si la lista no esta guardada, vacia sin preguntar como antes.
+
+## 1.7.15
+- Guardar: si la lista actual ya es una lista guardada (cargada desde "Listas guardadas" o guardada antes), el boton Guardar la actualiza directamente, sin preguntar si se desea reemplazarla. Solo se pide el nombre cuando la lista es nueva (y si ese nombre ya existe se sigue preguntando).
+- Nuevo boton "Lista nueva" (hoja con +) a la izquierda de Importar: vacia la lista actual para empezar otra desde cero. Las listas guardadas no se tocan. Si la lista actual no estaba guardada pide confirmacion.
+
+## 1.7.14
+- Carpeta de las listas de reproduccion configurable: en el menu del engranaje, "Cambiar carpeta de listas..." permite elegir donde se guardan (por ejemplo dentro de Dropbox) y "Usar la carpeta de listas predeterminada" vuelve a la de siempre. Al cambiarla se ofrece copiar las listas actuales (sin pisar las que ya existan en el destino). Si la carpeta elegida no esta disponible (disco desconectado, Dropbox cerrado) se usa la predeterminada y se avisa. El ajuste es por usuario y por equipo.
+- Las listas ya guardaban las rutas bajo la carpeta del usuario como %USERPROFILE%\..., asi que funcionan en otro equipo con la misma estructura (p. ej. Dropbox). Ahora tambien se convierten asi las listas que se importan.
+
 ## 1.7.13
 - Paquete MSIX (Microsoft Store): el menu contextual "Anadir a la lista de MiauPlayer" ahora es un comando de shell (IExplorerCommand, MiauShell.dll) que recibe toda la seleccion de una vez, asi que ya no hay limite de 15 archivos. Si MiauPlayer no esta abierto, lo inicia con la primera pista y envia el resto. El instalador normal no cambia (ya no tenia ese limite). Se conserva un manifiesto de respaldo con los verbos clasicos.
 - Paquete MSIX: el empaquetado genera ahora resources.pri (makepri) e incluye mas tamanos de icono sin placa, para que el icono de la barra de tareas ocupe todo el espacio en vez de verse pequeno sobre un cuadro azul.
