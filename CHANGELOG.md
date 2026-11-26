@@ -1,5 +1,33 @@
 # Cambios
 
+## 1.7.25
+- Salida de audio desconectada (auriculares o Bluetooth apagados, dispositivo retirado): la pista que suena se pone en pausa en el mismo punto, se selecciona automaticamente la salida de audio predeterminada de Windows (y se guarda como salida elegida) y se muestra un aviso. Al pulsar Play continua desde donde estaba, sin tener que buscar la salida. Si la salida elegida era la predeterminada, solo reacciona cuando se desconecta el dispositivo que se estaba usando.
+
+## 1.7.24
+- Posicion de reproduccion tras cambiar la salida de audio (p. ej. se apaga el Bluetooth y Windows pasa el sonido a los parlantes): el contador del dispositivo podia saltar o no reiniciarse tras un seek, y al pulsar la linea de tiempo la posicion quedaba casi al final de la pista. Ahora la posicion se contrasta con lo escrito menos lo que sigue en cola y, si el contador se aparta mas de 0,4 s, se resincroniza.
+
+## 1.7.23
+- Corregido un cierre del programa al capturar un fotograma de videos cuyo ancho no es multiplo de 16 (p. ej. videos verticales de 1080 px de ancho): los buffers de imagen donde swscale convierte el cuadro no tenian margen y la conversion SIMD escribia unos bytes pasado el final (acceso invalido en swscale-10.dll). Ahora todos los buffers de conversion (captura, video en pantalla y reescalado) llevan relleno.
+
+## 1.7.22
+- Captura de fotograma reforzada: la conversion y el guardado del PNG se hacen en un hilo aparte (la ventana ya no se congela en videos grandes o verticales), se limita el tamano maximo de la imagen, se corrige una relacion de aspecto anomala y cualquier error de memoria se controla en vez de cerrar el programa. Solo se permite una captura a la vez.
+- Registro de fallos: si el programa se cierra por un error, escribe el detalle (codigo, modulo, version) en %LOCALAPPDATA%\MiauPlayer\crash.log para poder diagnosticarlo.
+
+## 1.7.21
+- Controles multimedia del sistema (SMTC): MiauPlayer ahora crea una sesion de transporte multimedia de Windows, que es por donde llegan los botones de auriculares Bluetooth (siguiente, anterior, pausa, avance/retroceso), igual que hace Spotify. Antes solo usaba teclas globales, y Windows podia enviar el boton a otra app. Se carga de forma dinamica: si el sistema no lo admite, el programa sigue funcionando como antes con las teclas globales.
+- Un mismo comando repetido en menos de 400 ms se ignora, para que un boton no se atienda dos veces por dos vias.
+
+## 1.7.20
+- Teclas multimedia (boton siguiente/anterior/pausa del auricular Bluetooth): ya no se sueltan al cambiar de pista ni al detenerse. Antes se desregistraban y volvian a registrar al pasar por "detenido" (y la comprobacion era periodica), y en ese hueco otra app (navegador, etc.) podia quedarse con la tecla. Ahora se registran en cuanto empieza la reproduccion, se mantienen hasta 10 minutos despues de detenerse, y las que otra app tuviera ocupadas se reintentan cada 2 s.
+
+## 1.7.19
+- Carga progresiva en vez de cargar la pista entera antes de sonar: la reproduccion empieza en cuanto el demuxer tiene lo que necesita (unos cientos de KB en audio, unos pocos MB en video) y el resto del archivo se va leyendo a memoria en segundo plano mientras suena. Si el indice del archivo esta lejos de lo cargado (p. ej. MP4 con el indice al final) se lee directamente esa zona sin esperar. Aplica a archivos locales de hasta 160 MB; los mayores y las rutas de red se abren como antes.
+
+## 1.7.18
+- Menos cortes de audio en equipos lentos: el colchon de audio pasa de 4 a 8 bloques por defecto. En el menu del engranaje, "Bufer de audio" permite elegir Normal (4), Grande (8, recomendado) o Muy grande (16).
+- Mejor reproduccion desde Dropbox, pCloud, discos lentos o de red: la pista se lee completa a memoria antes de sonar (archivos de hasta 160 MB), asi la reproduccion y los saltos no dependen de lecturas durante la musica. Ademas se lee por adelantado la pista siguiente para que ya este descargada y en cache.
+- Nueva opcion "Acerca de MiauPlayer" en el menu del engranaje: abre la misma ventana de informacion del boton de informacion.
+
 ## 1.7.17
 - Icono de "Lista nueva" mas sencillo: hoja en blanco con la esquina doblada, sin el signo +.
 

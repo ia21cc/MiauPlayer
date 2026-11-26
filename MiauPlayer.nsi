@@ -5,7 +5,7 @@
 !include "x64.nsh"
 
 !define APP "MiauPlayer"
-!define VERSION "1.7.17"
+!define VERSION "1.7.25"
 !define UNKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\MiauPlayer"
 Name "${APP}"
 OutFile "MiauPlayer-Setup-${VERSION}.exe"
@@ -15,7 +15,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
 BrandingText "MiauPlayer ${VERSION}"
-VIProductVersion "1.7.17.0"
+VIProductVersion "1.7.25.0"
 VIAddVersionKey /LANG=1034 "ProductName" "MiauPlayer"
 VIAddVersionKey /LANG=1034 "FileDescription" "Instalador de MiauPlayer"
 VIAddVersionKey /LANG=1034 "FileVersion" "${VERSION}"

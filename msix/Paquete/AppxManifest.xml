@@ -12,7 +12,7 @@
 
   <Identity Name="ia21.MiauPlayer"
             Publisher="CN=99EC47F4-46C8-451A-8D0C-554779C4B800"
-            Version="1.7.17.0"
+            Version="1.7.25.0"
             ProcessorArchitecture="x64" />
 
   <Properties>

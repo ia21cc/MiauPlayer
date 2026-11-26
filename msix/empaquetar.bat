@@ -1,5 +1,5 @@
 @echo off
-rem Crea MiauPlayer-1.7.17.0-x64.msix (sin firmar) a partir de la carpeta "Paquete". Ese es el archivo que se sube a Partner Center.
+rem Crea MiauPlayer-1.7.25.0-x64.msix (sin firmar) a partir de la carpeta "Paquete". Ese es el archivo que se sube a Partner Center.
 rem Antes genera resources.pri (makepri): sin ese indice Windows ignora las variantes de icono (targetsize / altform-unplated)
 rem y dibuja el icono pequeno sobre una placa azul en la barra de tareas.
 setlocal
@@ -22,11 +22,11 @@ goto :empaquetar
 echo AVISO: no se encontro makepri.exe. Se empaqueta sin resources.pri y los iconos de la barra de tareas saldran con placa.
 
 :empaquetar
-if exist "%~dp0MiauPlayer-1.7.17.0-x64.msix" del "%~dp0MiauPlayer-1.7.17.0-x64.msix"
-"%MAKEAPPX%" pack /d "%~dp0Paquete" /p "%~dp0MiauPlayer-1.7.17.0-x64.msix" /o
+if exist "%~dp0MiauPlayer-1.7.25.0-x64.msix" del "%~dp0MiauPlayer-1.7.25.0-x64.msix"
+"%MAKEAPPX%" pack /d "%~dp0Paquete" /p "%~dp0MiauPlayer-1.7.25.0-x64.msix" /o
 if errorlevel 1 goto :errpack
 echo.
-echo Listo: MiauPlayer-1.7.17.0-x64.msix
+echo Listo: MiauPlayer-1.7.25.0-x64.msix
 pause
 exit /b 0
 

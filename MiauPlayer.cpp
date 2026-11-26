@@ -18,9 +18,16 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <mmdeviceapi.h>
+#include <inspectable.h>
+#include <eventtoken.h>
+#include <hstring.h>
+#include <systemmediatransportcontrolsinterop.h>
 #include <atomic>
 #include <string>
 #include <vector>
+#include <memory>
+#include <exception>
+#include <new>
 #include <algorithm>
 #include <unordered_map>
 #include <initializer_list>
@@ -149,6 +156,12 @@ static const TrEntry kTr[] = {
       L"The current list is not saved. Create a new list and discard it?",
       L"A lista atual n\u00e3o est\u00e1 salva. Criar uma nova lista e descart\u00e1-la?" },
     { L"Lista nueva", L"New list", L"Nova lista" },
+    { L"Salida de audio desconectada: en pausa. Pulsa Play para continuar", L"Audio output disconnected: paused. Press Play to continue", L"Sa\u00edda de \u00e1udio desconectada: em pausa. Pressione Play para continuar" },
+    { L"Salida desconectada: en pausa", L"Output disconnected: paused", L"Sa\u00edda desconectada: em pausa" },
+    { L"B\u00fafer de audio", L"Audio buffer", L"Buffer de \u00e1udio" },
+    { L"Normal", L"Normal", L"Normal" },
+    { L"Grande (recomendado)", L"Large (recommended)", L"Grande (recomendado)" },
+    { L"Muy grande", L"Very large", L"Muito grande" },
     { L"Esta es una lista guardada (\u201c", L"This is a saved list (\u201c", L"Esta \u00e9 uma lista salva (\u201c" },
     { L"\u201d). \u00bfSeguro que deseas vaciar la lista?", L"\u201d). Are you sure you want to clear the list?", L"\u201d). Tem certeza de que deseja esvaziar a lista?" },
     { L"Exportar la lista actual a .txt",
@@ -606,6 +619,131 @@ static bool isUrlA(const std::string& p) {
 }
 static int avInterrupt(void*) { return g_stop.load() ? 1 : 0; }   // permite cancelar una conexion en curso
 
+// ---- precarga: lee el archivo local completo a memoria antes de reproducir (nube: Dropbox, pCloud, discos lentos o en red).
+// Asi la reproduccion y los saltos no dependen de lecturas durante la musica. Solo archivos hasta kPreloadMax.
+struct MemIO {
+    std::unique_ptr<uint8_t[]> data;
+    int64_t size = 0, pos = 0;
+    std::atomic<int64_t> loaded{ 0 };   // bytes contiguos ya leidos desde el inicio
+    std::atomic<bool> stop{ false }, done{ false };
+    HANDLE th = nullptr, direct = INVALID_HANDLE_VALUE;
+};
+static const int64_t kPreloadMax = 160LL * 1024 * 1024;
+struct MemLoadArg { MemIO* m; std::wstring path; };
+static DWORD WINAPI memLoadThread(LPVOID p) {
+    MemLoadArg* a = (MemLoadArg*)p;
+    MemIO* m = a->m;
+    HANDLE f = CreateFileW(a->path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        int64_t got = 0;
+        while (got < m->size && !m->stop.load()) {
+            DWORD want = (DWORD)std::min<int64_t>(256 * 1024, m->size - got), rd = 0;
+            if (!ReadFile(f, m->data.get() + got, want, &rd, nullptr) || rd == 0) break;
+            got += rd;
+            m->loaded.store(got);
+        }
+        CloseHandle(f);
+    }
+    m->done.store(true);
+    delete a;
+    return 0;
+}
+static int memRead(void* o, uint8_t* buf, int n) {
+    MemIO* m = (MemIO*)o;
+    if (m->pos >= m->size) return AVERROR_EOF;
+    const int k = (int)std::min<int64_t>(n, m->size - m->pos);
+    for (;;) {
+        const int64_t ld = m->loaded.load();
+        if (m->pos < ld) {   // ya esta en memoria (lo que haya, aunque sea menos de lo pedido)
+            const int c = (int)std::min<int64_t>(k, ld - m->pos);
+            memcpy(buf, m->data.get() + m->pos, (size_t)c);
+            m->pos += c;
+            return c;
+        }
+        if (m->done.load()) return AVERROR_EOF;   // el hilo termino sin llegar hasta aqui (error de lectura)
+        if (g_stop.load()) return AVERROR_EXIT;
+        if (m->pos - ld > 2 * 1024 * 1024 && m->direct != INVALID_HANDLE_VALUE) {   // salto lejos de lo cargado (p. ej. indice al final): lectura directa
+            LARGE_INTEGER li; li.QuadPart = m->pos;
+            DWORD rd = 0;
+            if (!SetFilePointerEx(m->direct, li, nullptr, FILE_BEGIN) || !ReadFile(m->direct, buf, (DWORD)k, &rd, nullptr) || rd == 0) return AVERROR(EIO);
+            m->pos += rd;
+            return (int)rd;
+        }
+        Sleep(2);   // el hilo de carga esta por llegar
+    }
+}
+static int64_t memSeek(void* o, int64_t off, int wh) {
+    MemIO* m = (MemIO*)o;
+    if (wh & AVSEEK_SIZE) return m->size;
+    wh &= ~AVSEEK_FORCE;
+    int64_t np;
+    if (wh == SEEK_SET) np = off;
+    else if (wh == SEEK_CUR) np = m->pos + off;
+    else if (wh == SEEK_END) np = m->size + off;
+    else return -1;
+    if (np < 0) return -1;
+    if (np > m->size) np = m->size;
+    m->pos = np;
+    return np;
+}
+static std::wstring widePath(const std::string& u) {
+    const int n = MultiByteToWideChar(CP_UTF8, 0, u.c_str(), -1, nullptr, 0);
+    if (n <= 1) return std::wstring();
+    std::wstring w((size_t)n - 1, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, u.c_str(), -1, &w[0], n);
+    return w;
+}
+static void memFree(MemIO* m) {
+    m->stop.store(true);
+    if (m->th) { WaitForSingleObject(m->th, 5000); CloseHandle(m->th); }
+    if (m->direct != INVALID_HANDLE_VALUE) CloseHandle(m->direct);
+    delete m;
+}
+// Abre un archivo local leyendolo por adelantado a memoria en segundo plano: la reproduccion empieza en cuanto el
+// demuxer tiene lo que necesita (unos cientos de KB en audio) y el resto se va cargando mientras suena.
+// Devuelve < 0 si no se pudo (el llamador abre el archivo de la forma normal).
+static int openLocalPreloaded(AVFormatContext** out, const std::string& path) {
+    const std::wstring w = widePath(path);
+    if (w.empty()) return -1;
+    HANDLE f = CreateFileW(w.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_RANDOM_ACCESS, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return -1;
+    LARGE_INTEGER sz;
+    if (!GetFileSizeEx(f, &sz) || sz.QuadPart <= 0 || sz.QuadPart > kPreloadMax) { CloseHandle(f); return -1; }
+    MemIO* m = new MemIO;
+    m->size = sz.QuadPart;
+    m->data.reset(new (std::nothrow) uint8_t[(size_t)m->size]);
+    m->direct = f;
+    if (!m->data) { memFree(m); return -1; }
+    MemLoadArg* a = new MemLoadArg{ m, w };
+    m->th = CreateThread(nullptr, 0, memLoadThread, a, 0, nullptr);
+    if (!m->th) { delete a; memFree(m); return -1; }
+    SetThreadPriority(m->th, THREAD_PRIORITY_BELOW_NORMAL);
+    AVFormatContext* ctx = avformat_alloc_context();
+    unsigned char* iob = (unsigned char*)av_malloc(256 * 1024);
+    AVIOContext* io = (ctx && iob) ? avio_alloc_context(iob, 256 * 1024, 0, m, memRead, nullptr, memSeek) : nullptr;
+    if (!io) {
+        if (iob) av_free(iob);
+        if (ctx) avformat_free_context(ctx);
+        memFree(m);
+        return -1;
+    }
+    ctx->pb = io;
+    ctx->flags |= AVFMT_FLAG_CUSTOM_IO;
+    const int r = avformat_open_input(&ctx, path.c_str(), nullptr, nullptr);   // si falla libera ctx pero no el pb
+    if (r < 0) { av_freep(&io->buffer); avio_context_free(&io); memFree(m); return r; }
+    *out = ctx;
+    return 0;
+}
+static void closeInput(AVFormatContext** f) {
+    if (!f || !*f) return;
+    AVIOContext* io = nullptr;
+    MemIO* m = nullptr;
+    if (((*f)->flags & AVFMT_FLAG_CUSTOM_IO) && (*f)->pb) { io = (*f)->pb; m = (MemIO*)io->opaque; }
+    avformat_close_input(f);
+    if (io) { av_freep(&io->buffer); avio_context_free(&io); }
+    if (m) memFree(m);
+}
+
 // abre un archivo o una ruta de red; para RTSP prueba TCP y, si falla, UDP
 static int openInput(AVFormatContext** out, const std::string& path) {
     if (!isUrlA(path)) return avformat_open_input(out, path.c_str(), nullptr, nullptr);
@@ -701,7 +839,7 @@ struct Decoder {
         if (frm) av_frame_free(&frm);
         if (pkt) av_packet_free(&pkt);
         if (cc) avcodec_free_context(&cc);
-        if (fmt) avformat_close_input(&fmt);
+        if (fmt) closeInput(&fmt);
     }
 
     bool initSwr() {
@@ -718,9 +856,14 @@ struct Decoder {
     }
 
     // rate <= 0: la salida usa la frecuencia de muestreo original del archivo (sin remuestrear)
+    bool preload = false;   // true: leer el archivo local completo a memoria (reproduccion)
     bool open(const std::string& path, int rate, int ch, bool allowNoAudio = false) {
         outRate = rate > 0 ? rate : 48000; outCh = ch;
-        if (openInput(&fmt, path) < 0) { fmt = nullptr; return false; }
+        fmt = nullptr;
+        if (!(preload && !isUrlA(path) && openLocalPreloaded(&fmt, path) >= 0)) {
+            fmt = nullptr;
+            if (openInput(&fmt, path) < 0) { fmt = nullptr; return false; }
+        }
         if (avformat_find_stream_info(fmt, nullptr) < 0) return false;
         if (fmt->start_time != AV_NOPTS_VALUE) startOffset = fmt->start_time / (double)AV_TIME_BASE;
         if (fmt->duration != AV_NOPTS_VALUE && fmt->duration > 0) duration = fmt->duration / (double)AV_TIME_BASE;
@@ -827,7 +970,7 @@ struct Decoder {
 
 // ------------------------------------------------------------ estado global
 enum { ST_STOPPED, ST_PLAYING, ST_PAUSED };
-enum { WM_APP_END = WM_APP + 1, WM_APP_ERROR, WM_APP_OPENED, WM_APP_VIDEOINFO };
+enum { WM_APP_END = WM_APP + 1, WM_APP_ERROR, WM_APP_OPENED, WM_APP_VIDEOINFO, WM_APP_SMTC, WM_APP_CAPDONE, WM_APP_DEVCHG };
 enum {
     ID_OPEN = 100, ID_FOLDER, ID_PREV, ID_PLAY, ID_STOP, ID_NEXT, ID_RESET,
     ID_GAIN, ID_BASS, ID_MID, ID_TREBLE, ID_LIMIT, ID_LIST,
@@ -885,6 +1028,7 @@ static int g_cur = -1;
 static std::atomic<int> g_state(ST_STOPPED);
 static std::atomic<int> g_gen(0);            // generación de pista (invalida hilos viejos)
 static std::atomic<float> g_gainDb(0.f);
+static std::atomic<int> g_audioBuf(1);        // bufer de audio: 0 = normal (4 bloques), 1 = grande (8), 2 = muy grande (16)
 static std::atomic<int> g_rgMode(1);          // ReplayGain: 0 = desactivado, 1 = pista, 2 = album
 static std::atomic<float> g_speed(1.0f);     // velocidad de reproduccion 1/3x .. 3x (el tono se conserva)
 static std::atomic<float> g_eqDb[3];
@@ -1008,7 +1152,8 @@ static inline float softLimit(float x) {
 }
 
 // ------------------------------------------------------------ hilo de audio
-struct AudioJob { std::wstring path; double start; int gen; };
+struct AudioJob { std::wstring path; double start; int gen; bool paused = false; };
+static std::atomic<bool> g_nextStartPaused(false);   // la proxima pista se abre ya en pausa (cambio de salida de audio)
 
 // ------------------------------------------------------------ velocidad (atempo: cambia la velocidad sin cambiar el tono)
 struct Tempo {
@@ -1181,6 +1326,7 @@ static DWORD WINAPI audioThread(LPVOID p) {
     const int gen = job->gen;
     Decoder dec;
     dec.videoEnded = &g_videoEnded;
+    dec.preload = true;
     if (!dec.open(utf8(job->path), 0, 2, true)) {   // 0 = frecuencia original del archivo
         PostMessage(g_hwnd, WM_APP_ERROR, gen, 0);
         delete job;
@@ -1214,11 +1360,14 @@ static DWORD WINAPI audioThread(LPVOID p) {
         }
     }
     { Lock l(&g_hwoCS); g_hwo = h; }
+    if (job->paused) waveOutPause(h);   // abierta en pausa: no suena nada hasta que se pulse Play
 
     const int bpf = useFloat ? 8 : 4;                                          // bytes por cuadro (estereo)
-    const int FR = rate > 96000 ? 8192 : (rate > 48000 ? 4096 : 2048), NB = 4;   // mas cuadros por bloque a frecuencias altas
-    std::vector<uint8_t> bufs[NB];
-    WAVEHDR hdr[NB] = {};
+    const int ab = g_audioBuf.load();
+    const int FR = rate > 96000 ? 8192 : (rate > 48000 ? 4096 : 2048), NB = ab <= 0 ? 4 : (ab == 1 ? 8 : 16);   // mas cuadros por bloque a frecuencias altas; mas bloques = mas colchon ante cortes
+    std::vector<std::vector<uint8_t>> bufs((size_t)NB);
+    std::vector<WAVEHDR> hdr((size_t)NB);
+    memset(hdr.data(), 0, sizeof(WAVEHDR) * (size_t)NB);
     for (int i = 0; i < NB; i++) {
         bufs[i].assign((size_t)FR * bpf, 0);
         hdr[i].lpData = (LPSTR)bufs[i].data();
@@ -1251,6 +1400,7 @@ static DWORD WINAPI audioThread(LPVOID p) {
     bool eqOn = false;
     float curG = 0.f;   // entra con un fundido corto para evitar chasquidos
     float peak = 0;
+    double cOff = 0.0;  // correccion del contador de reproduccion del dispositivo (ver abajo)
 
     while (!g_stop) {
         double sr = g_seekReq.exchange(-1.0);
@@ -1343,6 +1493,15 @@ static DWORD WINAPI audioThread(LPVOID p) {
         if (waveOutGetPosition(h, &mt, sizeof(mt)) == MMSYSERR_NOERROR) {
             double played = mt.wType == TIME_SAMPLES ? (double)mt.u.sample
                           : mt.wType == TIME_BYTES ? mt.u.cb / (double)bpf : 0.0;
+            // Al cambiar la salida (p. ej. se apaga el Bluetooth y Windows pasa el sonido a los parlantes) el contador del
+            // dispositivo puede saltar o no reiniciarse tras un seek, y la posicion quedaba muy adelantada (casi al final).
+            // Lo reproducido nunca puede salirse de lo escrito menos lo que sigue en cola: si el contador se aparta mas de
+            // 0,4 s de esa cuenta, se resincroniza con ella.
+            long long inflightSamp = 0;
+            for (int i = 0; i < NB; i++) if (!(hdr[i].dwFlags & WHDR_DONE)) inflightSamp += (long long)hdr[i].dwBufferLength / bpf;
+            const double est = (double)(written - inflightSamp);
+            played -= cOff;
+            if (fabs(played - est) > 0.4 * rate) { cOff += played - est; played = est; }
             LARGE_INTEGER q; QueryPerformanceCounter(&q);
             g_posSec = mediaAt(played);
             while (segs.size() > 1 && segs[1].outStart <= played) segs.erase(segs.begin());
@@ -1481,7 +1640,7 @@ static DWORD WINAPI videoThread(LPVOID pp) {
             sws = sws_getCachedContext(sws, frm->width, frm->height, (AVPixelFormat)frm->format, dw, dh,
                                        AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
             if (sws) {
-                dst.resize((size_t)dw * dh * 4);
+                dst.resize((size_t)dw * dh * 4 + 256);   // relleno: swscale escribe de 16 en 16 pixeles y se pasa del final si el ancho no es multiplo de 16
                 uint8_t* dp[1] = { dst.data() };
                 int ds[1] = { dw * 4 };
                 sws_scale(sws, frm->data, frm->linesize, 0, frm->height, dp, ds);
@@ -1527,6 +1686,8 @@ static void stopAudio(bool keepVideo = false) {
     }
 }
 
+static void updateMediaKeysNow();
+static void devTrackDefault();
 static void startAudio(const std::wstring& path, double start) {
     stopAudio();
     ++g_gen;
@@ -1534,7 +1695,9 @@ static void startAudio(const std::wstring& path, double start) {
     g_posSec = start;
     g_posQpc = 0;
     g_state = ST_PLAYING;
-    AudioJob* j = new AudioJob{ path, start, g_gen.load() };
+    updateMediaKeysNow();
+    devTrackDefault();   // recuerda con que dispositivo predeterminado empieza esta reproduccion
+    AudioJob* j = new AudioJob{ path, start, g_gen.load(), g_nextStartPaused.exchange(false) };
     g_audioThread = CreateThread(nullptr, 0, audioThread, j, 0, nullptr);
     if (g_audioThread) SetThreadPriority(g_audioThread, THREAD_PRIORITY_ABOVE_NORMAL);
     else { delete j; g_state = ST_STOPPED; return; }
@@ -1572,6 +1735,32 @@ static void updateTitle() {
 
 static void relayout();
 
+// lee por adelantado la pista siguiente (la descarga si esta en la nube y la deja en la cache de Windows)
+static std::atomic<int> g_prefetchGen(0);
+struct PrefetchJob { std::wstring path; int gen; };
+static DWORD WINAPI prefetchThread(LPVOID p) {
+    PrefetchJob* j = (PrefetchJob*)p;
+    HANDLE f = CreateFileW(j->path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+    if (f != INVALID_HANDLE_VALUE) {
+        LARGE_INTEGER sz;
+        if (GetFileSizeEx(f, &sz) && sz.QuadPart > 0 && sz.QuadPart <= kPreloadMax) {
+            std::vector<uint8_t> b(1 << 20);
+            DWORD rd = 0;
+            while (j->gen == g_prefetchGen.load() && ReadFile(f, b.data(), (DWORD)b.size(), &rd, nullptr) && rd > 0) {}
+        }
+        CloseHandle(f);
+    }
+    delete j;
+    return 0;
+}
+static void prefetchNext(int i) {
+    const int gen = ++g_prefetchGen;
+    if (i + 1 >= (int)g_playlist.size() || isUrl(g_playlist[i + 1])) return;
+    PrefetchJob* j = new PrefetchJob{ g_playlist[i + 1], gen };
+    HANDLE h = CreateThread(nullptr, 0, prefetchThread, j, 0, nullptr);
+    if (h) { SetThreadPriority(h, THREAD_PRIORITY_LOWEST); CloseHandle(h); } else delete j;
+}
+
 static void playIndex(int i, double start = 0) {
     if (i < 0 || i >= (int)g_playlist.size()) return;
     g_cur = i;
@@ -1582,6 +1771,7 @@ static void playIndex(int i, double start = 0) {
     if (g_live) { ++g_waveGen; { Lock l(&g_waveCS); g_peaks.clear(); g_waveDone = true; } }
     else startWave(g_playlist[i]);
     startAudio(g_playlist[i], start);
+    prefetchNext(i);
     updateTitle();
     relayout();
     InvalidateRect(g_hwnd, nullptr, FALSE);
@@ -2917,6 +3107,7 @@ static void askAssociationFirstRun() {
         associateFileTypes();
 }
 
+static void showAbout();
 static void showCaptureOptions() {
     HMENU m = CreatePopupMenu();
     std::wstring cur = captureDir();
@@ -2950,7 +3141,17 @@ static void showCaptureOptions() {
         AppendMenu(rm, MF_STRING | (rgm == 2 ? MF_CHECKED : 0), 22, TX(L"\u00c1lbum"));
         AppendMenu(m, MF_POPUP, (UINT_PTR)rm, L"ReplayGain");
     }
+    {
+        const int ab = g_audioBuf.load();
+        HMENU bm = CreatePopupMenu();
+        AppendMenu(bm, MF_STRING | (ab == 0 ? MF_CHECKED : 0), 30, TX(L"Normal"));
+        AppendMenu(bm, MF_STRING | (ab == 1 ? MF_CHECKED : 0), 31, TX(L"Grande (recomendado)"));
+        AppendMenu(bm, MF_STRING | (ab == 2 ? MF_CHECKED : 0), 32, TX(L"Muy grande"));
+        AppendMenu(m, MF_POPUP, (UINT_PTR)bm, TX(L"B\u00fafer de audio"));
+    }
     AppendMenu(m, MF_STRING, 4, TX(L"Asociar tipos de archivo\u2026"));
+    AppendMenu(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenu(m, MF_STRING, 8, TX(L"Acerca de MiauPlayer"));
     RECT br;
     GetWindowRect(GetDlgItem(g_hwnd, ID_SNAPOPT), &br);
     SetForegroundWindow(g_hwnd);
@@ -2960,6 +3161,8 @@ static void showCaptureOptions() {
     if (cmd == 2) changeCaptureDir();
     else if (cmd == 3) { g_capDir.clear(); saveCaptureDir(); g_lastCapture.clear(); }
     else if (cmd == 4) associateFileTypes();
+    else if (cmd == 8) showAbout();
+    else if (cmd >= 30 && cmd <= 32) { g_audioBuf = cmd - 30; regSetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"AudioBuf", (DWORD)(cmd - 30)); }
     else if (cmd == 6) changePlaylistDir();
     else if (cmd == 7) applyPlaylistDir(std::wstring());
     else if (cmd >= 20 && cmd <= 22) { g_rgMode = cmd - 20; regSetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"ReplayGain", (DWORD)(cmd - 20)); }
@@ -2978,56 +3181,91 @@ static bool pngEncoderClsid(CLSID* out) {
     return false;
 }
 
+// ---- captura de fotograma: la conversion y el guardado del PNG se hacen en un hilo aparte (en videos grandes tardaban
+// varios segundos con la ventana congelada) y todo va protegido contra errores/memoria.
+static void noteCapture(const std::wstring& t, const std::wstring& toast) {
+    g_status = t;
+    SetTimer(g_hwnd, 3, 5000, nullptr);   // el aviso desaparece solo
+    g_toast = toast;                      // y un aviso corto sobre el video (se ve en pantalla completa)
+    g_toastUntil = GetTickCount() + 2600;
+    InvalidateRect(g_hwnd, nullptr, FALSE);
+}
+struct CapJob { AVFrame* f; int w, h; std::wstring path, name; };
+static std::atomic<bool> g_capBusy(false);
+struct CapResult { bool ok; std::wstring path, name; };
+static DWORD WINAPI captureThread(LPVOID p) {
+    CapJob* j = (CapJob*)p;
+    bool ok = false;
+    try {
+        SwsContext* sws = sws_getContext(j->f->width, j->f->height, (AVPixelFormat)j->f->format, j->w, j->h, AV_PIX_FMT_BGRA, SWS_BICUBIC, nullptr, nullptr, nullptr);
+        if (sws) {
+            std::vector<uint8_t> px((size_t)j->w * j->h * 4 + 256);   // relleno: swscale puede escribir unos bytes pasado el final (ancho no multiplo de 16)
+            uint8_t* dp[1] = { px.data() };
+            int ds[1] = { j->w * 4 };
+            const int rows = sws_scale(sws, j->f->data, j->f->linesize, 0, j->f->height, dp, ds);
+            sws_freeContext(sws);
+            CLSID png;
+            if (rows > 0 && pngEncoderClsid(&png)) {
+                Gdiplus::Bitmap bmp(j->w, j->h, j->w * 4, PixelFormat32bppRGB, px.data());
+                ok = bmp.Save(j->path.c_str(), &png, nullptr) == Gdiplus::Ok;
+            }
+        }
+    } catch (...) { ok = false; }
+    av_frame_free(&j->f);
+    CapResult* rs = nullptr;
+    try { rs = new CapResult{ ok, j->path, j->name }; } catch (...) {}
+    delete j;
+    if (!rs || !PostMessage(g_hwnd, WM_APP_CAPDONE, 0, (LPARAM)rs)) { delete rs; g_capBusy = false; }
+    return 0;
+}
+static void captureDone(CapResult* rs) {
+    if (rs) {
+        if (rs->ok) { g_lastCapture = rs->path; noteCapture(std::wstring(TX(L"Fotograma guardado: ")) + rs->name, TX(L"Fotograma guardado")); }
+        else noteCapture(TX(L"No se pudo guardar el fotograma"), TX(L"No se pudo guardar el fotograma"));
+        delete rs;
+    }
+    g_capBusy = false;
+}
 static void captureFrame() {
-    auto note = [](const std::wstring& t, const std::wstring& toast) {
-        g_status = t;
-        SetTimer(g_hwnd, 3, 5000, nullptr);   // el aviso desaparece solo
-        g_toast = toast;                      // y un aviso corto sobre el video (se ve en pantalla completa)
-        g_toastUntil = GetTickCount() + 2600;
-        InvalidateRect(g_hwnd, nullptr, FALSE);
-    };
+    if (g_capBusy.exchange(true)) return;   // ya hay una captura en curso
     AVFrame* f = nullptr;
     double dar = 1.0;
     if (g_hasVideo) {
         Lock l(&g_vidCS);
-        if (g_lastFrame && g_lastFrame->data[0] && g_lastFrame->width > 0) { f = av_frame_clone(g_lastFrame); dar = g_lastDar; }
+        if (g_lastFrame && g_lastFrame->data[0] && g_lastFrame->width > 0 && g_lastFrame->height > 0) { f = av_frame_clone(g_lastFrame); dar = g_lastDar; }
     }
-    if (!f) { note(TX(L"No hay video para capturar"), TX(L"No hay video para capturar")); return; }
-    const int h = f->height, w = std::max(2, (int)(h * dar + 0.5));   // alto original, ancho segun el aspecto real
-    SwsContext* sws = sws_getContext(f->width, f->height, (AVPixelFormat)f->format, w, h, AV_PIX_FMT_BGRA, SWS_BICUBIC, nullptr, nullptr, nullptr);
-    std::vector<uint8_t> px((size_t)w * h * 4);
-    bool ok = false;
-    if (sws) {
-        uint8_t* dp[1] = { px.data() };
-        int ds[1] = { w * 4 };
-        sws_scale(sws, f->data, f->linesize, 0, f->height, dp, ds);
-        sws_freeContext(sws);
-        const std::wstring dir = captureDir();
-        SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
-        std::wstring base = L"MiauPlayer";
-        if (g_cur >= 0 && g_cur < (int)g_playlist.size()) {
-            base = isUrl(g_playlist[g_cur]) ? L"stream" : baseName(g_playlist[g_cur]);
-            const size_t dot = base.find_last_of(L'.');
-            if (dot != std::wstring::npos && dot > 0 && base.size() - dot <= 5) base.resize(dot);
-        }
-        for (auto& c : base) if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
-        if (base.size() > 50) base.resize(50);
-        SYSTEMTIME st;
-        GetLocalTime(&st);
-        const int sec = (int)g_posSec.load();
-        wchar_t nm[160];
-        swprintf(nm, 160, L"%ls_%02d-%02d-%02d_%04d%02d%02d-%02d%02d%02d.png", base.c_str(), sec / 3600, (sec / 60) % 60, sec % 60,
-                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-        const std::wstring path = dir + L"\\" + nm;
-        CLSID png;
-        if (pngEncoderClsid(&png)) {
-            Gdiplus::Bitmap bmp(w, h, w * 4, PixelFormat32bppRGB, px.data());
-            ok = bmp.Save(path.c_str(), &png, nullptr) == Gdiplus::Ok;
-        }
-        if (ok) { g_lastCapture = path; note(std::wstring(TX(L"Fotograma guardado: ")) + nm, TX(L"Fotograma guardado")); }
+    if (!f) { g_capBusy = false; noteCapture(TX(L"No hay video para capturar"), TX(L"No hay video para capturar")); return; }
+    if (!(dar > 0.02 && dar < 50.0)) dar = (double)f->width / f->height;   // relacion de aspecto absurda: usar la del cuadro
+    int h = f->height, w = std::max(2, (int)(h * dar + 0.5));   // alto original, ancho segun el aspecto real
+    const double maxPx = 64.0 * 1000 * 1000;                    // limite de seguridad (~8K); si se pasa, se reduce
+    if ((double)w * h > maxPx) { const double k = sqrt(maxPx / ((double)w * h)); w = std::max(2, (int)(w * k)); h = std::max(2, (int)(h * k)); }
+    const std::wstring dir = captureDir();
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+    std::wstring base = L"MiauPlayer";
+    if (g_cur >= 0 && g_cur < (int)g_playlist.size()) {
+        base = isUrl(g_playlist[g_cur]) ? L"stream" : baseName(g_playlist[g_cur]);
+        const size_t dot = base.find_last_of(L'.');
+        if (dot != std::wstring::npos && dot > 0 && base.size() - dot <= 5) base.resize(dot);
     }
-    av_frame_free(&f);
-    if (!ok) note(TX(L"No se pudo guardar el fotograma"), TX(L"No se pudo guardar el fotograma"));
+    for (auto& c : base) if (c < 32 || wcschr(L"<>:\"/\\|?*", c)) c = L'_';
+    if (base.size() > 50) base.resize(50);
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    const int sec = (int)g_posSec.load();
+    wchar_t nm[160];
+    swprintf(nm, 160, L"%ls_%02d-%02d-%02d_%04d%02d%02d-%02d%02d%02d.png", base.c_str(), sec / 3600, (sec / 60) % 60, sec % 60,
+             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
+    CapJob* j = nullptr;
+    try { j = new CapJob{ f, w, h, dir + L"\\" + nm, nm }; } catch (...) { j = nullptr; }
+    HANDLE th = j ? CreateThread(nullptr, 0, captureThread, j, 0, nullptr) : nullptr;
+    if (!th) {
+        av_frame_free(&f);
+        delete j;
+        g_capBusy = false;
+        noteCapture(TX(L"No se pudo guardar el fotograma"), TX(L"No se pudo guardar el fotograma"));
+        return;
+    }
+    CloseHandle(th);
 }
 
 static void doOpenNetUrl() {
@@ -3495,7 +3733,7 @@ static void rescaleLastFrame() {
     }
     SwsContext* sws = sws_getContext(f->width, f->height, (AVPixelFormat)f->format, dw, dh, AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
     if (sws) {
-        std::vector<uint8_t> px((size_t)dw * dh * 4);
+        std::vector<uint8_t> px((size_t)dw * dh * 4 + 256);   // relleno (ver captura)
         uint8_t* dp[1] = { px.data() };
         int ds[1] = { dw * 4 };
         sws_scale(sws, f->data, f->linesize, 0, f->height, dp, ds);
@@ -4368,26 +4606,264 @@ static void ensureBackBuffer(HDC ref, int W, int H) {
 #define MOD_NOREPEAT 0x4000
 #endif
 enum { HK_PLAYPAUSE = 0x4D41, HK_NEXT, HK_PREV, HK_STOP };
-static bool g_mediaKeysOn = false;
-static void updateMediaKeys() {
-    const bool want = g_state != ST_STOPPED;
-    if (want == g_mediaKeysOn) return;
-    g_mediaKeysOn = want;
-    if (want) {
-        RegisterHotKey(g_hwnd, HK_PLAYPAUSE, MOD_NOREPEAT, VK_MEDIA_PLAY_PAUSE);   // si otra app ya la tiene, no se registra
-        RegisterHotKey(g_hwnd, HK_NEXT, MOD_NOREPEAT, VK_MEDIA_NEXT_TRACK);
-        RegisterHotKey(g_hwnd, HK_PREV, MOD_NOREPEAT, VK_MEDIA_PREV_TRACK);
-        RegisterHotKey(g_hwnd, HK_STOP, MOD_NOREPEAT, VK_MEDIA_STOP);
-    } else {
-        UnregisterHotKey(g_hwnd, HK_PLAYPAUSE);
-        UnregisterHotKey(g_hwnd, HK_NEXT);
-        UnregisterHotKey(g_hwnd, HK_PREV);
-        UnregisterHotKey(g_hwnd, HK_STOP);
+// ---- Controles multimedia del sistema (SMTC): por aqui llegan los botones de auriculares Bluetooth, pantalla de bloqueo, etc.
+// Windows envia esos botones a la app que tiene una sesion SMTC (como Spotify); las que solo usan teclas globales los pierden a veces.
+// Interfaces WinRT declaradas a mano (los encabezados de MinGW no las traen) y cargadas dinamicamente: si algo falla, no pasa nada.
+struct ISmtc : public IInspectable {   // Windows.Media.ISystemMediaTransportControls {99FA3FF4-1742-42A6-902E-087D41F965EC}
+    virtual HRESULT STDMETHODCALLTYPE get_PlaybackStatus(int*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_PlaybackStatus(int) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_DisplayUpdater(void**) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_SoundLevel(int*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsPlayEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsPlayEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsStopEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsStopEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsPauseEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsPauseEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsRecordEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsRecordEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsFastForwardEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsFastForwardEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsRewindEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsRewindEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsPreviousEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsPreviousEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsNextEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsNextEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsChannelUpEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsChannelUpEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE get_IsChannelDownEnabled(boolean*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE put_IsChannelDownEnabled(boolean) = 0;
+    virtual HRESULT STDMETHODCALLTYPE add_ButtonPressed(IUnknown*, EventRegistrationToken*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE remove_ButtonPressed(EventRegistrationToken) = 0;
+    virtual HRESULT STDMETHODCALLTYPE add_PropertyChanged(IUnknown*, EventRegistrationToken*) = 0;
+    virtual HRESULT STDMETHODCALLTYPE remove_PropertyChanged(EventRegistrationToken) = 0;
+};
+struct ISmtcButtonArgs : public IInspectable {   // {B7F47116-A56F-4DC8-9E11-92031F4A87C2}
+    virtual HRESULT STDMETHODCALLTYPE get_Button(int*) = 0;
+};
+static const GUID kIID_ISmtc = { 0x99fa3ff4, 0x1742, 0x42a6, { 0x90, 0x2e, 0x08, 0x7d, 0x41, 0xf9, 0x65, 0xec } };
+static const GUID kIID_ISmtcButtonArgs = { 0xb7f47116, 0xa56f, 0x4dc8, { 0x9e, 0x11, 0x92, 0x03, 0x1f, 0x4a, 0x87, 0xc2 } };
+// ITypedEventHandler<SystemMediaTransportControls, SystemMediaTransportControlsButtonPressedEventArgs>
+static const GUID kIID_SmtcHandler = { 0x0557e996, 0x7b23, 0x5bae, { 0xaa, 0x81, 0xea, 0x0d, 0x67, 0x11, 0x43, 0xa4 } };
+static const GUID kIID_IAgileObject = { 0x94ea2b94, 0xe9cc, 0x49e0, { 0xc0, 0xff, 0xee, 0x64, 0xca, 0x8f, 0x5b, 0x90 } };
+
+struct SmtcHandler {   // objeto COM con la forma de un ITypedEventHandler: vtable { QI, AddRef, Release, Invoke }
+    struct Vtbl {
+        HRESULT (STDMETHODCALLTYPE* QueryInterface)(SmtcHandler*, REFIID, void**);
+        ULONG (STDMETHODCALLTYPE* AddRef)(SmtcHandler*);
+        ULONG (STDMETHODCALLTYPE* Release)(SmtcHandler*);
+        HRESULT (STDMETHODCALLTYPE* Invoke)(SmtcHandler*, IUnknown*, IUnknown*);
+    };
+    const Vtbl* vt;
+    LONG ref;
+    static HRESULT STDMETHODCALLTYPE qi(SmtcHandler* t, REFIID iid, void** out) {
+        if (!out) return E_POINTER;
+        if (IsEqualGUID(iid, IID_IUnknown) || IsEqualGUID(iid, kIID_SmtcHandler) || IsEqualGUID(iid, kIID_IAgileObject)) { *out = t; InterlockedIncrement(&t->ref); return S_OK; }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    static ULONG STDMETHODCALLTYPE addref(SmtcHandler* t) { return (ULONG)InterlockedIncrement(&t->ref); }
+    static ULONG STDMETHODCALLTYPE release(SmtcHandler* t) { const LONG n = InterlockedDecrement(&t->ref); if (n == 0) delete t; return (ULONG)n; }
+    static HRESULT STDMETHODCALLTYPE invoke(SmtcHandler*, IUnknown*, IUnknown* args) {   // puede llamarse desde cualquier hilo: solo se avisa a la ventana
+        ISmtcButtonArgs* a = nullptr;
+        if (args && SUCCEEDED(args->QueryInterface(kIID_ISmtcButtonArgs, (void**)&a)) && a) {
+            int b = -1;
+            if (SUCCEEDED(a->get_Button(&b)) && g_hwnd) PostMessage(g_hwnd, WM_APP_SMTC, (WPARAM)b, 0);
+            a->Release();
+        }
+        return S_OK;
+    }
+};
+static const SmtcHandler::Vtbl kSmtcVtbl = { SmtcHandler::qi, SmtcHandler::addref, SmtcHandler::release, SmtcHandler::invoke };
+
+static ISmtc* g_smtc = nullptr;
+static EventRegistrationToken g_smtcTok = {};
+static int g_smtcStatus = -1;
+static void smtcInit() {
+    typedef HRESULT (WINAPI* PCreate)(PCWSTR, UINT32, HSTRING*);
+    typedef HRESULT (WINAPI* PDelete)(HSTRING);
+    typedef HRESULT (WINAPI* PGetFactory)(HSTRING, REFIID, void**);
+    HMODULE cb = LoadLibraryW(L"combase.dll");
+    if (!cb) return;
+    PCreate pCreate = (PCreate)GetProcAddress(cb, "WindowsCreateString");
+    PDelete pDelete = (PDelete)GetProcAddress(cb, "WindowsDeleteString");
+    PGetFactory pGet = (PGetFactory)GetProcAddress(cb, "RoGetActivationFactory");
+    if (!pCreate || !pDelete || !pGet) return;
+    static const wchar_t kCls[] = L"Windows.Media.SystemMediaTransportControls";
+    HSTRING hs = nullptr;
+    if (FAILED(pCreate(kCls, (UINT32)(sizeof(kCls) / sizeof(wchar_t) - 1), &hs)) || !hs) return;
+    ISystemMediaTransportControlsInterop* interop = nullptr;
+    HRESULT hr = pGet(hs, __uuidof(ISystemMediaTransportControlsInterop), (void**)&interop);
+    pDelete(hs);
+    if (FAILED(hr) || !interop) return;
+    ISmtc* sm = nullptr;
+    hr = interop->GetForWindow(g_hwnd, kIID_ISmtc, (void**)&sm);
+    interop->Release();
+    if (FAILED(hr) || !sm) return;
+    SmtcHandler* hd = new SmtcHandler{ &kSmtcVtbl, 1 };
+    EventRegistrationToken tok = {};
+    hr = sm->add_ButtonPressed((IUnknown*)hd, &tok);
+    hd->vt->Release(hd);   // SMTC conserva su propia referencia
+    if (FAILED(hr)) { sm->Release(); return; }
+    sm->put_IsEnabled(TRUE);
+    sm->put_IsPlayEnabled(TRUE);
+    sm->put_IsPauseEnabled(TRUE);
+    sm->put_IsStopEnabled(TRUE);
+    sm->put_IsNextEnabled(TRUE);
+    sm->put_IsPreviousEnabled(TRUE);
+    sm->put_IsFastForwardEnabled(TRUE);
+    sm->put_IsRewindEnabled(TRUE);
+    g_smtcTok = tok;
+    g_smtc = sm;
+}
+static void smtcUpdate() {   // estado de reproduccion: Windows manda los botones a la sesion que esta sonando
+    if (!g_smtc) return;
+    const int st = g_state == ST_PLAYING ? 3 : (g_state == ST_PAUSED ? 4 : 2);   // MediaPlaybackStatus: Playing 3, Paused 4, Stopped 2
+    if (st == g_smtcStatus) return;
+    g_smtcStatus = st;
+    g_smtc->put_PlaybackStatus(st);
+}
+static void smtcShutdown() {
+    if (!g_smtc) return;
+    g_smtc->remove_ButtonPressed(g_smtcTok);
+    g_smtc->put_IsEnabled(FALSE);
+    g_smtc->Release();
+    g_smtc = nullptr;
+}
+
+// comando multimedia unico para teclas globales, WM_APPCOMMAND y SMTC; ignora el mismo comando repetido en menos de 400 ms
+enum { MC_TOGGLE, MC_PLAY, MC_PAUSE, MC_STOP, MC_NEXT, MC_PREV, MC_FF, MC_REW };
+static void mediaCmd(int c) {
+    static DWORD last[8] = {};
+    const DWORD now = GetTickCount();
+    if (c <= MC_PREV && last[c] && now - last[c] < 400) return;
+    last[c] = now ? now : 1;
+    switch (c) {
+    case MC_TOGGLE: togglePause(); break;
+    case MC_PLAY: if (g_state != ST_PLAYING) togglePause(); break;
+    case MC_PAUSE: if (g_state == ST_PLAYING) togglePause(); break;
+    case MC_STOP: stopAll(); break;
+    case MC_NEXT: nextTrack(1); break;
+    case MC_PREV: nextTrack(-1); break;
+    case MC_FF: seekTo(g_posSec.load() + 10.0); break;
+    case MC_REW: seekTo(std::max(0.0, g_posSec.load() - 10.0)); break;
     }
 }
 
+// ---- salida de audio desconectada (auriculares Bluetooth apagados, etc.): pausa y pasa a la salida predeterminada
+class DevNotify : public IMMNotificationClient {
+public:
+    STDMETHODIMP QueryInterface(REFIID iid, void** pp) override {
+        if (!pp) return E_POINTER;
+        if (IsEqualIID(iid, IID_IUnknown) || IsEqualIID(iid, __uuidof(IMMNotificationClient))) { *pp = static_cast<IMMNotificationClient*>(this); return S_OK; }
+        *pp = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return 2; }     // vive durante todo el programa
+    STDMETHODIMP_(ULONG) Release() override { return 1; }
+    STDMETHODIMP OnDeviceStateChanged(LPCWSTR, DWORD) override { poke(); return S_OK; }
+    STDMETHODIMP OnDeviceAdded(LPCWSTR) override { return S_OK; }
+    STDMETHODIMP OnDeviceRemoved(LPCWSTR) override { poke(); return S_OK; }
+    STDMETHODIMP OnDefaultDeviceChanged(EDataFlow flow, ERole, LPCWSTR) override { if (flow == eRender) poke(); return S_OK; }
+    STDMETHODIMP OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+private:
+    static void poke() { if (g_hwnd) PostMessage(g_hwnd, WM_APP_DEVCHG, 0, 0); }   // se llama desde un hilo de COM
+};
+static DevNotify g_devNotify;
+static IMMDeviceEnumerator* g_devEnum = nullptr;
+static std::wstring g_playEpId;   // id del dispositivo predeterminado con el que se abrio la reproduccion
+
+static std::wstring defaultRenderId() {
+    std::wstring id;
+    if (!g_devEnum) return id;
+    IMMDevice* d = nullptr;
+    if (SUCCEEDED(g_devEnum->GetDefaultAudioEndpoint(eRender, eConsole, &d)) && d) {
+        LPWSTR w = nullptr;
+        if (SUCCEEDED(d->GetId(&w)) && w) { id = w; CoTaskMemFree(w); }
+        d->Release();
+    }
+    return id;
+}
+static bool endpointActive(const std::wstring& id) {
+    if (!g_devEnum || id.empty()) return true;   // sin datos: no se toca nada
+    IMMDevice* d = nullptr;
+    if (FAILED(g_devEnum->GetDevice(id.c_str(), &d)) || !d) return false;
+    DWORD st = 0;
+    const bool ok = SUCCEEDED(d->GetState(&st)) && st == DEVICE_STATE_ACTIVE;
+    d->Release();
+    return ok;
+}
+static void devTrackDefault() { g_playEpId = defaultRenderId(); }
+static void devInit() {
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&g_devEnum)) || !g_devEnum) { g_devEnum = nullptr; return; }
+    if (FAILED(g_devEnum->RegisterEndpointNotificationCallback(&g_devNotify))) { g_devEnum->Release(); g_devEnum = nullptr; return; }
+    g_playEpId = defaultRenderId();
+}
+static void devShutdown() {
+    if (!g_devEnum) return;
+    g_devEnum->UnregisterEndpointNotificationCallback(&g_devNotify);
+    g_devEnum->Release();
+    g_devEnum = nullptr;
+}
+// Se llama 0,5 s despues del ultimo aviso del sistema de audio. Si la salida que estaba en uso ya no esta disponible:
+// pausa en el mismo punto, elige la salida predeterminada de Windows y deja todo listo para continuar con Play.
+static void onDeviceEvent() {
+    if (g_state == ST_STOPPED || g_cur < 0) { g_playEpId = defaultRenderId(); return; }
+    std::wstring name;
+    { Lock l(&g_hwoCS); name = g_outName; }
+    bool gone = false;
+    if (!name.empty()) {
+        gone = true;
+        for (auto& d : listOutputs()) if (d.name == name) { gone = false; break; }
+    } else {
+        gone = !g_playEpId.empty() && !endpointActive(g_playEpId);
+    }
+    if (!gone) return;
+    const double pos = g_posSec.load();
+    { Lock l(&g_hwoCS); if (g_hwo) waveOutPause(g_hwo); }   // corta de inmediato lo que quede sonando
+    g_state = ST_PAUSED;
+    { Lock l(&g_hwoCS); g_outName.clear(); }
+    saveOutName();
+    g_nextStartPaused = true;
+    playIndex(g_cur, g_live ? 0.0 : pos);                  // reabre la pista en la salida predeterminada, en el mismo punto
+    g_state = ST_PAUSED;
+    if (!g_live) seekTo(pos);
+    g_playEpId = defaultRenderId();
+    noteCapture(TX(L"Salida de audio desconectada: en pausa. Pulsa Play para continuar"), TX(L"Salida desconectada: en pausa"));
+}
+
+static bool g_hkOk[4] = { false, false, false, false };   // que teclas multimedia estan registradas realmente
+static DWORD g_mediaLastActive = 0;                       // ultimo instante con reproduccion activa
+static DWORD g_mediaLastTry = 0;
+static void updateMediaKeys() {
+    // Las teclas se mantienen registradas mientras se reproduce y 10 minutos despues de detenerse (asi el boton del
+    // auricular sigue funcionando entre pistas y al terminar la lista). Las que otra app tenia ocupadas se reintentan cada 2 s.
+    const DWORD now = GetTickCount();
+    if (g_state != ST_STOPPED) g_mediaLastActive = now ? now : 1;
+    const bool want = g_state != ST_STOPPED || (g_mediaLastActive && now - g_mediaLastActive < 10 * 60 * 1000);
+    static const int ids[4] = { HK_PLAYPAUSE, HK_NEXT, HK_PREV, HK_STOP };
+    static const UINT vks[4] = { VK_MEDIA_PLAY_PAUSE, VK_MEDIA_NEXT_TRACK, VK_MEDIA_PREV_TRACK, VK_MEDIA_STOP };
+    if (want) {
+        bool all = true;
+        for (bool k : g_hkOk) all = all && k;
+        if (all || (g_mediaLastTry && now - g_mediaLastTry < 2000)) return;
+        g_mediaLastTry = now;
+        for (int i = 0; i < 4; i++)
+            if (!g_hkOk[i]) g_hkOk[i] = RegisterHotKey(g_hwnd, ids[i], MOD_NOREPEAT, vks[i]) != FALSE;   // si otra app ya la tiene, se reintenta
+    } else {
+        for (int i = 0; i < 4; i++)
+            if (g_hkOk[i]) { UnregisterHotKey(g_hwnd, ids[i]); g_hkOk[i] = false; }
+    }
+}
+
+static void updateMediaKeysNow() { updateMediaKeys(); smtcUpdate(); }
+
 static void onTimer() {
     updateMediaKeys();
+    smtcUpdate();
     // texto de tiempo
     double dur = g_duration;
     double pos = g_dragging ? g_dragFrac * dur : g_posSec.load();
@@ -4426,7 +4902,7 @@ static void onTimer() {
 }
 
 // ------------------------------------------------------------ ventana "Acerca de"
-#define APP_VERSION L"1.7.17"
+#define APP_VERSION L"1.7.25"
 static const wchar_t* kAboutClass = L"MiauAbout";
 static const wchar_t* kSiteUrl = L"https://ia21.cc";
 static const wchar_t* kKofiUrl = L"https://ko-fi.com/miauapps";
@@ -5068,6 +5544,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         DragAcceptFiles(h, TRUE);
         applyWindowChrome(h);
         SetWindowPos(h, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+        smtcInit();
+        devInit();
         SetTimer(h, 1, 40, nullptr);
         return 0;
     }
@@ -5178,7 +5656,8 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_TIMER:
         if (w == 3) { KillTimer(h, 3); g_status.clear(); InvalidateRect(h, nullptr, FALSE); return 0; }
-        if (w == 4) { KillTimer(h, 4); askAssociationFirstRun(); return 0; }   // primer arranque: ofrece asociar archivos
+        if (w == 4) { KillTimer(h, 4); askAssociationFirstRun(); return 0; }
+        if (w == 5) { KillTimer(h, 5); onDeviceEvent(); return 0; }   // primer arranque: ofrece asociar archivos
         if (w == 2) {
             KillTimer(h, 2);
             if (g_openFirst >= 0 && g_openFirst < (int)g_playlist.size()) { g_listFloat = false; playIndex(g_openFirst); }
@@ -5351,22 +5830,36 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     }
     case WM_HOTKEY:   // teclas multimedia (atajos globales)
         switch (w) {
-        case HK_PLAYPAUSE: togglePause(); break;
-        case HK_NEXT: nextTrack(1); break;
-        case HK_PREV: nextTrack(-1); break;
-        case HK_STOP: stopAll(); break;
+        case HK_PLAYPAUSE: mediaCmd(MC_TOGGLE); break;
+        case HK_NEXT: mediaCmd(MC_NEXT); break;
+        case HK_PREV: mediaCmd(MC_PREV); break;
+        case HK_STOP: mediaCmd(MC_STOP); break;
         }
+        return 0;
+    case WM_APP_CAPDONE: captureDone((CapResult*)l); return 0;
+    case WM_APP_DEVCHG: SetTimer(h, 5, 500, nullptr); return 0;   // junta varios avisos seguidos en uno
+    case WM_APP_SMTC:   // botones de SMTC: 0 Play, 1 Pause, 2 Stop, 4 FastForward, 5 Rewind, 6 Next, 7 Previous
+        switch ((int)w) {
+        case 0: mediaCmd(MC_PLAY); break;
+        case 1: mediaCmd(MC_PAUSE); break;
+        case 2: mediaCmd(MC_STOP); break;
+        case 4: mediaCmd(MC_FF); break;
+        case 5: mediaCmd(MC_REW); break;
+        case 6: mediaCmd(MC_NEXT); break;
+        case 7: mediaCmd(MC_PREV); break;
+        }
+        smtcUpdate();
         return 0;
     case WM_APPCOMMAND: {   // teclas multimedia cuando la ventana tiene el foco (y adelantar/retroceder)
         switch (GET_APPCOMMAND_LPARAM(l)) {
-        case APPCOMMAND_MEDIA_NEXTTRACK: nextTrack(1); return TRUE;
-        case APPCOMMAND_MEDIA_PREVIOUSTRACK: nextTrack(-1); return TRUE;
-        case APPCOMMAND_MEDIA_PLAY_PAUSE: togglePause(); return TRUE;
-        case APPCOMMAND_MEDIA_PLAY: if (g_state != ST_PLAYING) togglePause(); return TRUE;
-        case APPCOMMAND_MEDIA_PAUSE: if (g_state == ST_PLAYING) togglePause(); return TRUE;
-        case APPCOMMAND_MEDIA_STOP: stopAll(); return TRUE;
-        case APPCOMMAND_MEDIA_FAST_FORWARD: seekTo(g_posSec.load() + 10.0); return TRUE;
-        case APPCOMMAND_MEDIA_REWIND: seekTo(std::max(0.0, g_posSec.load() - 10.0)); return TRUE;
+        case APPCOMMAND_MEDIA_NEXTTRACK: mediaCmd(MC_NEXT); return TRUE;
+        case APPCOMMAND_MEDIA_PREVIOUSTRACK: mediaCmd(MC_PREV); return TRUE;
+        case APPCOMMAND_MEDIA_PLAY_PAUSE: mediaCmd(MC_TOGGLE); return TRUE;
+        case APPCOMMAND_MEDIA_PLAY: mediaCmd(MC_PLAY); return TRUE;
+        case APPCOMMAND_MEDIA_PAUSE: mediaCmd(MC_PAUSE); return TRUE;
+        case APPCOMMAND_MEDIA_STOP: mediaCmd(MC_STOP); return TRUE;
+        case APPCOMMAND_MEDIA_FAST_FORWARD: mediaCmd(MC_FF); return TRUE;
+        case APPCOMMAND_MEDIA_REWIND: mediaCmd(MC_REW); return TRUE;
         }
         break;   // volumen y demas: que los maneje Windows
     }
@@ -5438,13 +5931,50 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     case WM_DESTROY:
         KillTimer(h, 1);
-        if (g_mediaKeysOn) { UnregisterHotKey(h, HK_PLAYPAUSE); UnregisterHotKey(h, HK_NEXT); UnregisterHotKey(h, HK_PREV); UnregisterHotKey(h, HK_STOP); }
+        smtcShutdown();
+        devShutdown();
+        { UnregisterHotKey(h, HK_PLAYPAUSE); UnregisterHotKey(h, HK_NEXT); UnregisterHotKey(h, HK_PREV); UnregisterHotKey(h, HK_STOP); }
         stopAudio();
         ++g_waveGen;
         PostQuitMessage(0);
         return 0;
     }
     return DefWindowProc(h, m, w, l);
+}
+
+// ---- registro de fallos: si el programa se cierra por un error, deja el detalle en %LOCALAPPDATA%\MiauPlayer\crash.log
+static void writeCrashLog(const wchar_t* what, DWORD code, void* addr) {
+    wchar_t dir[MAX_PATH] = L"";
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, dir)) || !dir[0]) return;
+    std::wstring d = std::wstring(dir) + L"\\MiauPlayer";
+    CreateDirectoryW(d.c_str(), nullptr);
+    HANDLE f = CreateFileW((d + L"\\crash.log").c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return;
+    wchar_t mod[MAX_PATH] = L"?";
+    HMODULE hm = nullptr;
+    size_t off = 0;
+    if (addr && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCWSTR)addr, &hm) && hm) {
+        GetModuleFileNameW(hm, mod, MAX_PATH);
+        off = (size_t)((char*)addr - (char*)hm);
+    }
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    wchar_t line[1400];
+    swprintf(line, 1400, L"%04d-%02d-%02d %02d:%02d:%02d  MiauPlayer %ls  %ls  codigo=0x%08lX  modulo=%ls+0x%llX  pista=%d  hasVideo=%d\r\n",
+             t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, APP_VERSION, what, (unsigned long)code, mod, (unsigned long long)off, (int)g_cur, (int)g_hasVideo);
+    char u[4200];
+    const int n = WideCharToMultiByte(CP_UTF8, 0, line, -1, u, sizeof(u), nullptr, nullptr);
+    DWORD wr = 0;
+    if (n > 1) WriteFile(f, u, (DWORD)(n - 1), &wr, nullptr);
+    CloseHandle(f);
+}
+static LONG WINAPI crashFilter(EXCEPTION_POINTERS* ep) {
+    writeCrashLog(L"EXCEPCION", ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionCode : 0, ep && ep->ExceptionRecord ? ep->ExceptionRecord->ExceptionAddress : nullptr);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+static void crashTerminate() {
+    writeCrashLog(L"TERMINATE (excepcion de C++ sin controlar)", 0, nullptr);
+    abort();
 }
 
 int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
@@ -5470,6 +6000,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
     initLanguage(langArg);
     loadCaptureDir();
     { DWORD rv = 0; if (regGetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"ReplayGain", rv) && rv <= 2) g_rgMode = (int)rv; }
+    { DWORD rv = 0; if (regGetDword(HKEY_CURRENT_USER, L"Software\\MiauPlayer", L"AudioBuf", rv) && rv <= 2) g_audioBuf = (int)rv; }
     // instancia unica: si ya hay un MiauPlayer abierto, le pasamos los archivos y salimos
     HANDLE singleMutex = CreateMutexW(nullptr, FALSE, L"Local\\MiauPlayer.SingleInstance");
     if (singleMutex && GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -5496,6 +6027,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
     loadOutName();
     InitializeCriticalSection(&g_waveCS);
     InitializeCriticalSection(&g_vidCS);
+    SetUnhandledExceptionFilter(crashFilter);
+    std::set_terminate(crashTerminate);
     OleInitialize(nullptr);
     INITCOMMONCONTROLSEX ic = { sizeof(ic), ICC_BAR_CLASSES | ICC_WIN95_CLASSES };
     InitCommonControlsEx(&ic);
